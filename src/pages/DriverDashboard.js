@@ -180,7 +180,7 @@ const DriverDashboard = () => {
           setIsAvailable(true);
           if (socket) {
             socket.emit('driver-online', {
-              driverId: user._id,
+              driverId: user?._id,
               location: currentLocation,
               vehicle: user.vehicle
             });
@@ -292,7 +292,7 @@ const DriverDashboard = () => {
     });
   }, []);
 
-  // ============ START WATCHING LOCATION ============
+  // ============ START WATCHING LOCATION - FIXED ============
   const startWatchingLocation = () => {
     if (watchIdRef.current) {
       navigator.geolocation.clearWatch(watchIdRef.current);
@@ -300,6 +300,12 @@ const DriverDashboard = () => {
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
+        // 👇 GUARD CLAUSE - Prevents undefined driverId
+        if (!user || !user._id) {
+          console.log("⏳ Waiting for user authorization context to fully load...");
+          return;
+        }
+
         const location = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
@@ -373,9 +379,10 @@ const DriverDashboard = () => {
           });
         }
 
+        // ============ FIX: Use user._id (NOT user.id) ============
         if (socket) {
           socket.emit('driver-location', {
-            driverId: user?._id,
+            driverId: user?._id,  // ✅ Fixed: _id not id
             location,
             rotation: carRotation,
             speed: position.coords.speed || 0,
@@ -631,7 +638,7 @@ const DriverDashboard = () => {
   const cancelRide = async () => {
     if (!currentRide) return;
     
-    if (rideStatus === 'in-progress ') {
+    if (rideStatus === 'in-progress') {
       toast.error('Cannot cancel ride while in progress');
       return;
     }
@@ -721,7 +728,9 @@ const DriverDashboard = () => {
         toast.success('✅ You are online');
         setRoutePoints([currentLocation]);
       } else if (socket) {
-        socket.emit('driver-offline', { driverId: user?._id });
+        socket.emit('driver-offline', { 
+          driverId: user?._id 
+        });
         toast.success('You are offline');
         setRoutePoints([]);
       }
@@ -769,7 +778,10 @@ const DriverDashboard = () => {
         }, 1000);
       } else {
         if (socket) {
-          socket.emit('accept-ride', { rideId, driverId: user?._id });
+          socket.emit('accept-ride', { 
+            rideId, 
+            driverId: user?._id 
+          });
         }
       }
     } catch (error) {
@@ -780,85 +792,55 @@ const DriverDashboard = () => {
     }
   };
 
-  // ============ START RIDE - FIXED ============
-const startRide = async () => {
-  try {
-    setIsLoading(true);
-    console.log('🚗 Starting ride...');
-    console.log('📡 Ride ID:', currentRide?._id);
-    console.log('📡 Current status:', rideStatus);
-    
-    const token = localStorage.getItem('token');
-    const startLocation = { 
-      lat: currentLocation.lat, 
-      lng: currentLocation.lng 
-    };
-    
-    console.log('📍 Start Location:', startLocation);
-    
-    // Step 1: If not already arrived, set to arrived first
-    if (rideStatus === 'accepted') {
-      console.log('🔄 Setting status to arrived first...');
-      try {
-        await axios.put(
-          `${API_URL}/api/drivers/manual-arrival/${currentRide._id}`,
-          {},
-          { headers: { 'Authorization': `Bearer ${token}` } }
-        );
-        console.log('✅ Status set to arrived');
-        setRideStatus('arrived');
-        setIsAtPickup(true);
-        setArrivalChecked(true);
-      } catch (arrivalError) {
-        console.warn('⚠️ Manual arrival failed, continuing anyway:', arrivalError.message);
-      }
-    }
-    
-    // Step 2: Now set to in-progress
-    console.log('🔄 Setting status to in-progress...');
-    
+  // ============ START RIDE ============
+  const startRide = async () => {
     try {
-      const response = await axios.put(
-        `${API_URL}/api/drivers/ride-status/${currentRide._id}`,
-        { status: 'in-progress' },
-        { headers: { 'Authorization': `Bearer ${token}` } }
-      );
-      console.log('✅ Ride started via driver endpoint:', response.data);
+      setIsLoading(true);
+      console.log('🚗 Starting ride...');
+      console.log('📡 Ride ID:', currentRide?._id);
       
-      setRideStatus('in-progress');
+      const token = localStorage.getItem('token');
+      
+      const startLocation = { ...currentLocation };
       setRideStartLocation(startLocation);
       setRideStartTime(new Date());
       setRideDistanceTraveled(0);
       
-      if (socket) {
-        socket.emit('update-ride-status', {
-          rideId: currentRide._id,
-          status: 'in-progress',
-          riderId: currentRide.rider?._id,
-          driverId: user._id
-        });
-      }
+      let started = false;
       
-      setDriverRoute(getRoutePointsWithCurve(currentLocation, currentRide.dropoffLocation, 30));
-      toast.success('🚗 Ride started!');
-      setIsLoading(false);
-      return;
-    } catch (error) {
-      console.error('❌ Driver endpoint failed:', error.response?.data);
-      
-      // Fallback to rides endpoint
       try {
         const response = await axios.put(
-          `${API_URL}/api/rides/${currentRide._id}/status`,
-          { status: 'in-progress' },
+          `${API_URL}/api/drivers/ride-status/${currentRide._id}`,
+          { 
+            status: 'in-progress',
+            startLocation: startLocation,
+            startTime: new Date().toISOString()
+          },
           { headers: { 'Authorization': `Bearer ${token}` } }
         );
-        console.log('✅ Ride started via rides endpoint:', response.data);
-        
+        console.log('✅ Ride started via driver endpoint:', response.data);
+        started = true;
+      } catch (error) {
+        if (error.response?.status === 404) {
+          console.log('🔄 Trying rides endpoint for start...');
+          const response = await axios.put(
+            `${API_URL}/api/rides/${currentRide._id}/status`,
+            { 
+              status: 'in-progress',
+              startLocation: startLocation,
+              startTime: new Date().toISOString()
+            },
+            { headers: { 'Authorization': `Bearer ${token}` } }
+          );
+          console.log('✅ Ride started via rides endpoint:', response.data);
+          started = true;
+        } else {
+          throw error;
+        }
+      }
+      
+      if (started) {
         setRideStatus('in-progress');
-        setRideStartLocation(startLocation);
-        setRideStartTime(new Date());
-        setRideDistanceTraveled(0);
         
         if (socket) {
           socket.emit('update-ride-status', {
@@ -871,26 +853,21 @@ const startRide = async () => {
         
         setDriverRoute(getRoutePointsWithCurve(currentLocation, currentRide.dropoffLocation, 30));
         toast.success('🚗 Ride started!');
-        setIsLoading(false);
-        return;
-      } catch (fallbackError) {
-        console.error('❌ Both endpoints failed:', fallbackError.response?.data);
-        throw fallbackError;
       }
+    } catch (error) {
+      console.error('❌ Failed to start ride:', error);
+      toast.error(error.response?.data?.error || 'Failed to start ride');
+    } finally {
+      setIsLoading(false);
     }
-  } catch (error) {
-    console.error('❌ Failed to start ride:', error);
-    console.error('❌ Error details:', error.response?.data);
-    toast.error(error.response?.data?.error || 'Failed to start ride');
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
   // ============ HANDLE LOGOUT ============
   const handleLogout = () => {
     if (isAvailable) {
-      socket?.emit('driver-offline', { driverId: user?._id });
+      socket?.emit('driver-offline', { 
+        driverId: user?._id 
+      });
     }
     logout();
     navigate('/login');
@@ -1101,7 +1078,7 @@ const startRide = async () => {
     });
 
     socket.on('new-message', (msg) => {
-      if (msg.senderId !== user?.id && !isChatOpen) {
+      if (msg.senderId !== user?._id && !isChatOpen) {
         setUnreadMessages(prev => prev + 1);
         const senderName = msg.senderRole === 'rider' ? (currentRide?.rider?.name || 'Rider') : 'Driver';
         toast.success(`💬 ${senderName}: ${msg.message}`, { duration: 3000, icon: '💬' });
@@ -1164,9 +1141,9 @@ const startRide = async () => {
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
       {/* Header */}
-      <header className="bg-black text-white px-5 py-3 flex justify-between items-center shadow-lg z-30 flex-shrink-0">
+      <header className="bg-black text-white px-4 py-3 flex justify-between items-center shadow-lg z-30 flex-shrink-0">
         <div className="flex items-center">
-          <h1 className="text-xl font-bold">🇿🇦 Vai </h1>
+          <h1 className="text-xl font-bold">🇿🇦 Vai</h1>
           <button 
             onClick={() => navigate('/profile')} 
             className="ml-2 text-sm font-bold bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
@@ -1644,11 +1621,11 @@ const startRide = async () => {
                 <button
                   onClick={toggleAvailability}
                   disabled={isLoading}
-                  className={`flex flex-col items-center justify-center w-12 h-12 rounded-full shadow-lg -mt-6 transition ${
+                  className={`flex flex-col items-center justify-center w-12 h-12 rounded-full shadow-lg -mt-6 transition ${(
                     isAvailable
                       ? 'bg-green-600 text-white hover:bg-green-700'
                       : 'bg-gray-600 text-white hover:bg-gray-700'
-                  } disabled:opacity-50`}
+                  )} disabled:opacity-50`}
                 >
                   {isAvailable ? '●' : '○'}
                   <span className="text-[8px] mt-0.5 font-medium">
@@ -1959,7 +1936,7 @@ const startRide = async () => {
                     {rideStatus === 'in-progress' && (
                       <div className="pt-2 border-t mt-2">
                         <p className="text-center text-xs text-gray-500">
-                          ⚠️ Cannot cancel ride while in progress!
+                          ⚠️ Cannot cancel ride while in progress. Use "Complete Ride" instead.
                         </p>
                       </div>
                     )}

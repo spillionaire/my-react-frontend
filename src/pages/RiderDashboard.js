@@ -22,9 +22,7 @@ import {
   FaBug,
   FaCreditCard,
   FaMoneyBillWave,
-  FaWallet,
-  FaStar,
-  FaInfoCircle
+  FaWallet
 } from 'react-icons/fa';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -303,7 +301,7 @@ const RiderDashboard = () => {
             setDriverInfo(ride.driver);
             
             if (socket) {
-              socket.emit('join-ride-room', { rideId: ride._id, userId: user?.id, role: 'rider' });
+              socket.emit('join-ride-room', { rideId: ride._id, userId: user?._id, role: 'rider' });
               socket.emit('request-driver-location', { driverId: driverIdValue, rideId: ride._id });
             }
           }
@@ -491,7 +489,7 @@ const RiderDashboard = () => {
             if (socket && currentRide?._id) {
               socket.emit('join-ride-room', { 
                 rideId: currentRide._id, 
-                userId: user?.id, 
+                userId: user?._id, 
                 role: 'rider' 
               });
               socket.emit('request-driver-location', { 
@@ -587,14 +585,14 @@ const RiderDashboard = () => {
       if (socket) {
         socket.emit('join-ride-room', { 
           rideId: ride._id, 
-          userId: user.id, 
+          userId: user?._id, 
           role: 'rider' 
         });
       }
       
       socket?.emit('request-ride', {
         rideId: ride._id,
-        riderId: user.id,
+        riderId: user?._id,
         pickup: ride.pickupLocation,
         dropoff: ride.dropoffLocation,
         fare: ride.fare,
@@ -611,7 +609,6 @@ const RiderDashboard = () => {
   const cancelRide = async () => {
     if (!currentRide || !window.confirm('Cancel this ride?')) return;
     
-    // Don't allow cancel if ride is in progress
     if (rideStatus === 'in-progress') {
       toast.error('Cannot cancel ride while in progress');
       return;
@@ -620,8 +617,8 @@ const RiderDashboard = () => {
     try {
       setIsLoading(true);
       await axios.put(`${API_URL}/api/rides/${currentRide._id}/cancel`);
-      socket?.emit('cancel-ride', { rideId: currentRide._id, riderId: user.id, driverId: driverId });
-      socket?.emit('ride-request-cancelled', { rideId: currentRide._id, riderId: user.id });
+      socket?.emit('cancel-ride', { rideId: currentRide._id, riderId: user?._id, driverId: driverId });
+      socket?.emit('ride-request-cancelled', { rideId: currentRide._id, riderId: user?._id });
       toast.success('Ride cancelled');
       setCurrentRide(null);
       setRideStatus(null);
@@ -723,57 +720,53 @@ const RiderDashboard = () => {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
-    
-{/* Header - History hidden on mobile, visible on desktop */}
-<header className="bg-black text-white px-4 py-3 flex justify-between items-center shadow-lg z-30 flex-shrink-0">
-  <div className="flex items-center">
-    <h1 className="text-xl font-bold">🇿🇦 Vai</h1>
-    <button 
-      onClick={() => navigate('/profile')} 
-      className="ml-2 text-sm font-bold bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
-    >
-      {user?.role === 'driver' ? '🚗 Driver' : '👤 Rider'}
-    </button>
-    {isGettingLocation && (
-      <span className="ml-2 text-[10px] bg-yellow-600 px-2 py-0.5 rounded-full animate-pulse">📍 GPS</span>
-    )}
-    {isPeak && (
-      <span className="ml-2 text-[10px] bg-red-600 px-2 py-0.5 rounded-full animate-pulse">⚡ Peak</span>
-    )}
-    {driverSpeed > 0 && rideStatus === 'accepted' && (
-      <span className="ml-2 text-[10px] bg-blue-600 px-2 py-0.5 rounded-full">{Math.round(driverSpeed)} km/h</span>
-    )}
-    {driverLocation && (
-      <span className="ml-2 text-[10px] bg-green-600 px-2 py-0.5 rounded-full animate-pulse">📍 Live</span>
-    )}
-  </div>
-  <div className="flex items-center space-x-3">
-    {/* History - Only visible on desktop */}
-    {!isMobile && (
-      <button 
-        onClick={() => navigate('/history')} 
-        className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
-      >
-        History
-      </button>
-    )}
-    <button 
-      onClick={requestDriverLocation}
-      className="text-xs bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded-lg transition"
-    >
-      📍 Get Driver
-    </button>
-    <button 
-      onClick={() => setShowDebug(!showDebug)} 
-      className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
-    >
-      <FaBug className="inline mr-1" /> Debug
-    </button>
-    <button onClick={handleLogout} className="text-xs bg-red-600 hover:bg-red-700 px-3 py-1 rounded-lg transition">
-      Logout
-    </button>
-  </div>
-</header>
+      {/* Header */}
+      <header className="bg-black text-white px-4 py-3 flex justify-between items-center shadow-lg z-30 flex-shrink-0">
+        <div className="flex items-center">
+          <h1 className="text-xl font-bold">🇿🇦 Vai</h1>
+          <button 
+            onClick={() => navigate('/profile')} 
+            className="ml-2 text-sm font-bold bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
+          >
+            {user?.role === 'driver' ? '🚗 Driver' : '👤 Rider'}
+          </button>
+          {isGettingLocation && (
+            <span className="ml-2 text-[10px] bg-yellow-600 px-2 py-0.5 rounded-full animate-pulse">📍 GPS</span>
+          )}
+          {isPeak && (
+            <span className="ml-2 text-[10px] bg-red-600 px-2 py-0.5 rounded-full animate-pulse">⚡ Peak</span>
+          )}
+          {driverSpeed > 0 && rideStatus === 'accepted' && (
+            <span className="ml-2 text-[10px] bg-blue-600 px-2 py-0.5 rounded-full">{Math.round(driverSpeed)} km/h</span>
+          )}
+          {driverLocation && (
+            <span className="ml-2 text-[10px] bg-green-600 px-2 py-0.5 rounded-full animate-pulse">📍 Live</span>
+          )}
+        </div>
+        <div className="flex items-center space-x-3">
+          <button 
+            onClick={() => navigate('/history')} 
+            className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
+          >
+            History
+          </button>
+          <button 
+            onClick={requestDriverLocation}
+            className="text-xs bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded-lg transition"
+          >
+            📍 Get Driver
+          </button>
+          <button 
+            onClick={() => setShowDebug(!showDebug)} 
+            className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
+          >
+            <FaBug className="inline mr-1" /> Debug
+          </button>
+          <button onClick={handleLogout} className="text-xs bg-red-600 hover:bg-red-700 px-3 py-1 rounded-lg transition">
+            Logout
+          </button>
+        </div>
+      </header>
 
       {/* Map */}
       <div className="flex-1 relative overflow-hidden">
@@ -1194,7 +1187,7 @@ const RiderDashboard = () => {
                             {service.id === 'economy' && '💰 Budget'}
                             {service.id === 'standard' && '⭐ Standard'}
                             {service.id === 'premium' && '💎 Luxury'}
-                    
+                            {service.id === 'moto' && '🏍️ Fast'}
                           </div>
                         </button>
                       ))}
