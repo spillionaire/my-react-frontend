@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import axios from 'axios';
@@ -93,6 +93,27 @@ const EARLY_COMPLETION_REASONS = [
   { id: 'emergency', label: 'Emergency situation' },
   { id: 'other', label: 'Other reason' }
 ];
+
+// ============ CHANGE MAP VIEW - UPDATED ============
+function ChangeMapView({ targetLocation, zoom = 15 }) {
+  const map = useMap();
+  const [lastSnappedLocation, setLastSnappedLocation] = useState(null);
+
+  useEffect(() => {
+    if (targetLocation && targetLocation[0] && targetLocation[1]) {
+      const latLngString = `${targetLocation[0]},${targetLocation[1]}`;
+      
+      // Only snap if this location is genuinely different from the last one we snapped to
+      if (lastSnappedLocation !== latLngString) {
+        console.log('🗺️ Snapping map to:', targetLocation);
+        map.setView(targetLocation, zoom);
+        setLastSnappedLocation(latLngString);
+      }
+    }
+  }, [targetLocation, map, zoom, lastSnappedLocation]);
+
+  return null;
+}
 
 const DriverDashboard = () => {
   const { user, logout, updateUser } = useAuth();
@@ -300,7 +321,7 @@ const DriverDashboard = () => {
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
-        // 👇 GUARD CLAUSE
+        // 👇 GUARD CLAUSE - Prevents undefined driverId
         if (!user || !user._id) {
           console.log("⏳ Waiting for user authorization context to fully load...");
           return;
@@ -379,7 +400,7 @@ const DriverDashboard = () => {
           });
         }
 
-        // ✅ FIXED: user._id NOT user.id
+        // ============ FIX: Use user._id (NOT user.id) ============
         if (socket) {
           socket.emit('driver-location', {
             driverId: user?._id,
@@ -1144,49 +1165,60 @@ const DriverDashboard = () => {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
-      {/* Header */}
-      <header className="bg-black text-white px-4 py-3 flex justify-between items-center shadow-lg z-30 flex-shrink-0">
-        <div className="flex items-center">
-          <h1 className="text-xl font-bold">🇿🇦 Vai</h1>
+      {/* Header - Smooth Flat Twitter-style */}
+      <header className="w-full bg-white border-b border-gray-100 px-4 py-3 flex justify-between items-center shadow-none z-30 flex-shrink-0">
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center">
+            <FaCar className="h-6 w-6 text-black mr-2" />
+            <h1 className="text-xl font-bold text-black">Vai</h1>
+          </div>
           <button 
             onClick={() => navigate('/profile')} 
-            className="ml-2 text-sm font-bold bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
+            className="text-sm text-gray-500 hover:text-black transition-colors font-medium"
           >
-            {user?.role === 'driver' ? '🚗 Driver' : 'Rider'}
+            {user?.role === 'driver' ? 'Driver' : 'Rider'}
           </button>
           {isGettingLocation && (
-            <span className="ml-2 text-[10px] bg-yellow-600 px-2 py-0.5 rounded-full animate-pulse">📍 GPS</span>
+            <span className="text-[10px] text-gray-400">📍 GPS</span>
           )}
           {isAvailable && (
-            <span className="ml-2 text-[10px] bg-green-600 px-2 py-0.5 rounded-full animate-pulse">● Online</span>
+            <span className="text-[10px] text-green-500">● Online</span>
           )}
           {isAtPickup && (
-            <span className="ml-2 text-[10px] bg-purple-600 px-2 py-0.5 rounded-full animate-pulse">📍 Arrived</span>
+            <span className="text-[10px] text-purple-500">📍 Arrived</span>
           )}
           {rideRequests.length > 0 && (
-            <span className="ml-2 text-[10px] bg-red-600 px-2 py-0.5 rounded-full animate-pulse">
+            <span className="text-[10px] text-red-500 font-medium">
               {rideRequests.length} 📬
             </span>
           )}
           {speed > 5 && (
-            <span className="ml-2 text-[10px] bg-blue-600 px-2 py-0.5 rounded-full">{Math.round(speed)} km/h</span>
+            <span className="text-[10px] text-blue-500">{Math.round(speed)} km/h</span>
           )}
         </div>
-        <div className="flex items-center space-x-3">
-          <button 
-            onClick={() => navigate('/history')} 
-            className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
-          >
-            History
-          </button>
+        <div className="flex items-center space-x-4">
+          {/* History - Desktop only */}
+          {!isMobile && (
+            <button 
+              onClick={() => navigate('/history')} 
+              className="text-gray-400 hover:text-black transition-colors"
+            >
+              <FaHistory className="h-5 w-5" />
+            </button>
+          )}
+          {/* Debug */}
           <button 
             onClick={() => setShowDebug(!showDebug)} 
-            className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
+            className="text-gray-400 hover:text-black transition-colors"
           >
-            <FaBug className="inline mr-1" /> Debug
+            <FaBug className="h-5 w-5" />
           </button>
-          <button onClick={handleLogout} className="text-xs bg-red-600 hover:bg-red-700 px-3 py-1 rounded-lg transition">
-            Logout
+          {/* Logout */}
+          <button 
+            onClick={handleLogout} 
+            className="text-gray-400 hover:text-red-500 transition-colors"
+          >
+            <FaSignOutAlt className="h-5 w-5" />
           </button>
         </div>
       </header>
@@ -1216,6 +1248,8 @@ const DriverDashboard = () => {
               error: () => setTileLoading(false)
             }}
           />
+          
+          <ChangeMapView targetLocation={[mapCenter.lat, mapCenter.lng]} zoom={15} />
           
           <Marker 
             position={[currentLocation.lat, currentLocation.lng]}
@@ -1349,7 +1383,7 @@ const DriverDashboard = () => {
           <>
             {/* Mobile Ride Requests Sheet */}
             {!currentRide && isAvailable && rideRequests.length > 0 && (
-              <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl p-3 z-30 border-t border-gray-200 safe-area-bottom max-h-64 overflow-y-auto" style={{ marginBottom: '56px' }}>
+              <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-3 z-30 border-t border-gray-100 safe-area-bottom max-h-64 overflow-y-auto" style={{ marginBottom: '56px' }}>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-semibold text-sm flex items-center">
                     <span className="text-yellow-500 mr-2">🔔</span> Ride Requests
@@ -1387,7 +1421,7 @@ const DriverDashboard = () => {
 
             {/* Mobile Navigation Info */}
             {currentRide && rideStatus === 'accepted' && !isAtPickup && (
-              <div className="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm rounded-t-2xl shadow-2xl p-4 z-30 border-t border-gray-200 safe-area-bottom" style={{ marginBottom: '56px' }}>
+              <div className="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm rounded-t-2xl shadow-lg p-4 z-30 border-t border-gray-100 safe-area-bottom" style={{ marginBottom: '56px' }}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
                     <div className="bg-blue-100 p-2 rounded-full">
@@ -1452,7 +1486,7 @@ const DriverDashboard = () => {
 
             {/* Mobile Ride Status Sheet */}
             {currentRide && (
-              <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl p-4 z-30 border-t border-gray-200 safe-area-bottom" style={{ marginBottom: '56px' }}>
+              <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-4 z-30 border-t border-gray-100 safe-area-bottom" style={{ marginBottom: '56px' }}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <div className={`w-2.5 h-2.5 rounded-full ${
@@ -1605,36 +1639,39 @@ const DriverDashboard = () => {
               </div>
             )}
 
-            {/* Mobile Bottom Navigation Bar */}
-            <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 safe-area-bottom">
+            {/* Mobile Bottom Navigation - Twitter-style */}
+            <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-bottom">
               <div className="flex items-center justify-around h-14 max-w-screen-lg mx-auto px-4">
                 <button
                   onClick={() => navigate('/driver')}
-                  className="flex flex-col items-center justify-center text-black"
+                  className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors"
                 >
                   <FaHome className="h-5 w-5" />
-                  <span className="text-[9px] mt-0.5">Home</span>
+                  <span className="text-[9px] mt-0.5 text-gray-400">Home</span>
                 </button>
                 <button
                   onClick={() => navigate('/history')}
-                  className="flex flex-col items-center justify-center text-gray-400 hover:text-gray-600"
+                  className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors"
                 >
                   <FaHistory className="h-5 w-5" />
-                  <span className="text-[9px] mt-0.5">History</span>
+                  <span className="text-[9px] mt-0.5 text-gray-400">History</span>
                 </button>
                 <button
                   onClick={toggleAvailability}
                   disabled={isLoading}
-                  className={`flex flex-col items-center justify-center w-12 h-12 rounded-full shadow-lg -mt-6 transition ${
-                    isAvailable
-                      ? 'bg-green-600 text-white hover:bg-green-700'
-                      : 'bg-gray-600 text-white hover:bg-gray-700'
-                  } disabled:opacity-50`}
+                  className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors disabled:opacity-50"
                 >
-                  {isAvailable ? '●' : '○'}
-                  <span className="text-[8px] mt-0.5 font-medium">
-                    {isAvailable ? 'Online' : 'Offline'}
-                  </span>
+                  {isAvailable ? (
+                    <>
+                      <div className="h-3 w-3 rounded-full bg-green-500"></div>
+                      <span className="text-[9px] mt-0.5 text-green-500 font-medium">Online</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="h-3 w-3 rounded-full bg-gray-300"></div>
+                      <span className="text-[9px] mt-0.5 text-gray-400">Offline</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

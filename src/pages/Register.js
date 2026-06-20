@@ -1,254 +1,390 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { FaCar, FaUser, FaEnvelope, FaLock, FaPhone, FaIdCard } from 'react-icons/fa';
+import { useNavigate, Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
+import { 
+  FaUser, 
+  FaEnvelope, 
+  FaLock, 
+  FaPhone, 
+  FaCar, 
+  FaArrowRight,
+  FaGoogle,
+  FaFacebook,
+  FaArrowLeft
+} from 'react-icons/fa';
 
 const Register = () => {
+  const { register } = useAuth();
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
+    confirmPassword: '',
     phone: '',
     role: 'rider',
     vehicle: {
       model: '',
       plateNumber: '',
       color: '',
-    },
+      type: 'sedan'
+    }
   });
-  const [loading, setLoading] = useState(false);
-  const { register } = useAuth();
-  const navigate = useNavigate();
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    if (name.includes('.')) {
-      const [parent, child] = name.split('.');
+    
+    if (name.startsWith('vehicle.')) {
+      const field = name.split('.')[1];
       setFormData(prev => ({
         ...prev,
-        [parent]: {
-          ...prev[parent],
-          [child]: value
+        vehicle: {
+          ...prev.vehicle,
+          [field]: value
         }
       }));
     } else {
-      setFormData(prev => ({
-        ...prev,
-        [name]: value
-      }));
+      setFormData(prev => ({ ...prev, [name]: value }));
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    const result = await register(formData);
-    setLoading(false);
     
-    if (result.success) {
-      navigate(result.user.role === 'driver' ? '/driver' : '/rider');
+    if (formData.password !== formData.confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
     }
+
+    if (formData.password.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
+    if (formData.phone.length < 10) {
+      toast.error('Please enter a valid phone number');
+      return;
+    }
+
+    setLoading(true);
+
+    const userData = {
+      name: formData.name,
+      email: formData.email,
+      password: formData.password,
+      phone: formData.phone,
+      role: formData.role,
+    };
+
+    if (formData.role === 'driver') {
+      userData.vehicle = formData.vehicle;
+    }
+
+    const result = await register(userData);
+
+    if (result.success) {
+      if (result.user.role === 'rider') {
+        navigate('/rider');
+      } else if (result.user.role === 'driver') {
+        navigate('/driver');
+      } else {
+        navigate('/');
+      }
+    }
+    setLoading(false);
   };
 
+  const vehicleTypes = [
+    { value: 'sedan', label: 'Sedan' },
+    { value: 'suv', label: 'SUV' },
+    { value: 'van', label: 'Van' },
+    { value: 'hatchback', label: 'Hatchback' },
+    { value: 'motorbike', label: 'Motorbike' }
+  ];
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-xl shadow-lg">
-        <div className="text-center">
-          <div className="flex justify-center">
-            <FaCar className="h-12 w-12 text-black" />
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8 max-w-md w-full max-h-[90vh] overflow-y-auto">
+        {/* Back Button */}
+        <button
+          onClick={() => navigate('/login')}
+          className="text-gray-400 hover:text-black transition-colors mb-4"
+        >
+          <FaArrowLeft className="h-5 w-5" />
+        </button>
+
+        {/* Logo */}
+        <div className="text-center mb-6">
+          <div className="flex justify-center mb-3">
+            <div className="bg-black rounded-full p-4">
+              <FaCar className="h-10 w-10 text-white" />
+            </div>
           </div>
-          <h2 className="mt-6 text-3xl font-extrabold text-gray-900">
-            Join Vai
-          </h2>
-          <p className="mt-2 text-sm text-gray-600">
-            Create your account and start riding
-          </p>
+          <h1 className="text-2xl font-bold text-gray-900">Create Account</h1>
+          <p className="text-gray-500 text-sm mt-1">Sign up to get started</p>
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            {/* Full Name */}
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                Full Name
-              </label>
-              <div className="mt-1 relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <FaUser className="h-5 w-5 text-gray-400" />
-                </div>
-                <input
-                  id="name"
-                  name="name"
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={handleChange}
-                  className="appearance-none block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-black focus:border-black"
-                  placeholder="Enter your full name"
-                />
-              </div>
-            </div>
-
-            {/* Email */}
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email Address
-              </label>
-              <div className="mt-1 relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <FaEnvelope className="h-5 w-5 text-gray-400" />
-                </div>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  required
-                  value={formData.email}
-                  onChange={handleChange}
-                  className="appearance-none block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-black focus:border-black"
-                  placeholder="Enter your email"
-                />
-              </div>
-            </div>
-
-            {/* Password */}
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                Password
-              </label>
-              <div className="mt-1 relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <FaLock className="h-5 w-5 text-gray-400" />
-                </div>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  required
-                  value={formData.password}
-                  onChange={handleChange}
-                  className="appearance-none block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-black focus:border-black"
-                  placeholder="Create a password (min 6 characters)"
-                />
-              </div>
-            </div>
-
-            {/* Phone */}
-            <div>
-              <label htmlFor="phone" className="block text-sm font-medium text-gray-700">
-                Phone Number
-              </label>
-              <div className="mt-1 relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <FaPhone className="h-5 w-5 text-gray-400" />
-                </div>
-                <input
-                  id="phone"
-                  name="phone"
-                  type="tel"
-                  required
-                  value={formData.phone}
-                  onChange={handleChange}
-                  className="appearance-none block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-black focus:border-black"
-                  placeholder="Enter phone number"
-                />
-              </div>
-            </div>
-
-            {/* Role Selection */}
-            <div>
-              <label htmlFor="role" className="block text-sm font-medium text-gray-700">
-                I want to
-              </label>
-              <select
-                id="role"
-                name="role"
-                value={formData.role}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Name */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Full Name
+            </label>
+            <div className="relative">
+              <FaUser className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                name="name"
+                value={formData.name}
                 onChange={handleChange}
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-black focus:border-black rounded-md"
-              >
-                <option value="rider">🚗 Ride as a passenger</option>
-                <option value="driver">🚙 Drive and earn</option>
-              </select>
+                placeholder="John Doe"
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black transition"
+                required
+              />
             </div>
+          </div>
 
-            {/* Vehicle Information (for drivers) */}
-            {formData.role === 'driver' && (
-              <div className="space-y-4 border-t pt-4">
-                <h3 className="text-sm font-medium text-gray-900 flex items-center">
-                  <FaIdCard className="mr-2" /> Vehicle Information
-                </h3>
-                
+          {/* Email */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Email Address
+            </label>
+            <div className="relative">
+              <FaEnvelope className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                placeholder="you@example.com"
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black transition"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Phone */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Phone Number
+            </label>
+            <div className="relative">
+              <FaPhone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                type="tel"
+                name="phone"
+                value={formData.phone}
+                onChange={handleChange}
+                placeholder="082 123 4567"
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black transition"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Password */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Password
+            </label>
+            <div className="relative">
+              <FaLock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                type="password"
+                name="password"
+                value={formData.password}
+                onChange={handleChange}
+                placeholder="Min 6 characters"
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black transition"
+                required
+                minLength="6"
+              />
+            </div>
+          </div>
+
+          {/* Confirm Password */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Confirm Password
+            </label>
+            <div className="relative">
+              <FaLock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              <input
+                type="password"
+                name="confirmPassword"
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                placeholder="Confirm your password"
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black transition"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Role Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              I am a...
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setFormData(prev => ({ ...prev, role: 'rider' }))}
+                className={`py-3 rounded-lg border-2 text-sm font-medium transition ${
+                  formData.role === 'rider'
+                    ? 'border-black bg-black text-white'
+                    : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                }`}
+              >
+                🚶 Rider
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData(prev => ({ ...prev, role: 'driver' }))}
+                className={`py-3 rounded-lg border-2 text-sm font-medium transition ${
+                  formData.role === 'driver'
+                    ? 'border-black bg-black text-white'
+                    : 'border-gray-300 text-gray-600 hover:border-gray-400'
+                }`}
+              >
+                🚗 Driver
+              </button>
+            </div>
+          </div>
+
+          {/* Vehicle Details - Only show for Driver */}
+          {formData.role === 'driver' && (
+            <div className="border-t border-gray-200 pt-4 space-y-3">
+              <p className="text-sm font-medium text-gray-700 flex items-center">
+                <FaCar className="mr-2" /> Vehicle Details
+              </p>
+              
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="vehicle.model" className="block text-sm font-medium text-gray-700">
-                    Vehicle Model
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Vehicle Type
+                  </label>
+                  <select
+                    name="vehicle.type"
+                    value={formData.vehicle.type}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black text-sm"
+                  >
+                    {vehicleTypes.map(type => (
+                      <option key={type.value} value={type.value}>{type.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Model
                   </label>
                   <input
-                    id="vehicle.model"
-                    name="vehicle.model"
                     type="text"
-                    required={formData.role === 'driver'}
+                    name="vehicle.model"
                     value={formData.vehicle.model}
                     onChange={handleChange}
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-black focus:border-black"
-                    placeholder="e.g., Toyota Camry"
+                    placeholder="Toyota Corolla"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black text-sm"
+                    required
                   />
                 </div>
+              </div>
 
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="vehicle.plateNumber" className="block text-sm font-medium text-gray-700">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Color
+                  </label>
+                  <input
+                    type="text"
+                    name="vehicle.color"
+                    value={formData.vehicle.color}
+                    onChange={handleChange}
+                    placeholder="White"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Plate Number
                   </label>
                   <input
-                    id="vehicle.plateNumber"
-                    name="vehicle.plateNumber"
                     type="text"
-                    required={formData.role === 'driver'}
+                    name="vehicle.plateNumber"
                     value={formData.vehicle.plateNumber}
                     onChange={handleChange}
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-black focus:border-black"
-                    placeholder="e.g., ABC-1234"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="vehicle.color" className="block text-sm font-medium text-gray-700">
-                    Vehicle Color
-                  </label>
-                  <input
-                    id="vehicle.color"
-                    name="vehicle.color"
-                    type="text"
-                    required={formData.role === 'driver'}
-                    value={formData.vehicle.color}
-                    onChange={handleChange}
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-black focus:border-black"
-                    placeholder="e.g., Black"
+                    placeholder="CA 123-45"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black text-sm"
+                    required
                   />
                 </div>
               </div>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition disabled:opacity-50 font-medium flex items-center justify-center"
+          >
+            {loading ? (
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+            ) : (
+              <>
+                Create Account
+                <FaArrowRight className="ml-2 h-4 w-4" />
+              </>
             )}
-          </div>
-
-          <div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black disabled:opacity-50 transition"
-            >
-              {loading ? 'Creating account...' : 'Create Account'}
-            </button>
-          </div>
-
-          <div className="text-center">
-            <p className="text-sm text-gray-600">
-              Already have an account?{' '}
-              <Link to="/login" className="font-medium text-black hover:underline">
-                Sign In
-              </Link>
-            </p>
-          </div>
+          </button>
         </form>
+
+        {/* Divider */}
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-200"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-4 bg-white text-gray-400">or continue with</span>
+          </div>
+        </div>
+
+        {/* Social Buttons */}
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => toast.info('Google signup coming soon!')}
+            className="flex items-center justify-center py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+          >
+            <FaGoogle className="h-5 w-5 text-red-500" />
+            <span className="ml-2 text-sm font-medium text-gray-600">Google</span>
+          </button>
+          <button
+            onClick={() => toast.info('Facebook signup coming soon!')}
+            className="flex items-center justify-center py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+          >
+            <FaFacebook className="h-5 w-5 text-blue-600" />
+            <span className="ml-2 text-sm font-medium text-gray-600">Facebook</span>
+          </button>
+        </div>
+
+        {/* Login Link */}
+        <div className="mt-6 text-center">
+          <p className="text-sm text-gray-500">
+            Already have an account?{' '}
+            <Link to="/login" className="text-black font-medium hover:underline">
+              Sign in
+            </Link>
+          </p>
+          <p className="text-sm text-gray-500 mt-1">
+            Are you a driver?{' '}
+            <Link to="/driver-apply" className="text-black font-medium hover:underline">
+              Apply now
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );

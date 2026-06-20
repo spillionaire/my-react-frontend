@@ -1,4 +1,3 @@
-// src/pages/Profile.js
 import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -17,7 +16,8 @@ import {
   FaSave,
   FaTimes,
   FaWallet,
-  FaSignOutAlt
+  FaSignOutAlt,
+  FaArrowRight
 } from 'react-icons/fa';
 import { API_URL } from '../config';
 
@@ -38,79 +38,62 @@ const Profile = () => {
     savedAddresses: user?.savedAddresses || []
   });
 
+  // ============ GET INITIALS FOR AVATAR ============
+  const getInitials = (name) => {
+    if (!name) return '?';
+    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  };
+
   // ============ HANDLE PHOTO UPLOAD ============
   const handlePhotoUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Validate file type
     if (!file.type.startsWith('image/')) {
       toast.error('Please select an image file');
       return;
     }
 
-    // Validate file size (max 2MB)
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error('Image must be less than 2MB');
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be less than 5MB');
       return;
     }
 
     try {
       setUploading(true);
-      console.log('📸 Uploading photo...');
       toast.loading('Uploading photo...', { id: 'upload' });
       
-      // Convert to base64
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
+      const formData = new FormData();
+      formData.append('photo', file);
       
-      reader.onload = async () => {
-        try {
-          const photoUrl = reader.result;
-          console.log('📸 Photo converted, sending to server...');
-          
-          const token = localStorage.getItem('token');
-          const response = await axios.post(`${API_URL}/api/auth/upload-photo`, 
-            { photoUrl },
-            { 
-              headers: { 
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-              },
-              timeout: 30000
-            }
-          );
-          
-          console.log('✅ Photo uploaded successfully:', response.data);
-          
-          // Update user context
-          const photoUrlResult = response.data.photoUrl || response.data.photoUrl;
-          updateUser({ profilePhoto: photoUrlResult });
-          setFormData(prev => ({ ...prev, profilePhoto: photoUrlResult }));
-          
-          toast.dismiss('upload');
-          toast.success('Profile photo updated!');
-          
-        } catch (error) {
-          console.error('❌ Upload error:', error);
-          console.error('❌ Response:', error.response?.data);
-          toast.dismiss('upload');
-          toast.error(error.response?.data?.error || 'Failed to upload photo');
-        } finally {
-          setUploading(false);
+      const token = localStorage.getItem('token');
+      const response = await axios.post(`${API_URL}/api/auth/upload-photo`, 
+        formData,
+        { 
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          },
+          timeout: 30000
         }
-      };
+      );
       
-      reader.onerror = () => {
-        toast.dismiss('upload');
-        toast.error('Failed to read image file');
-        setUploading(false);
-      };
+      const photoUrl = response.data.photoUrl;
+      updateUser({ profilePhoto: photoUrl });
+      setFormData(prev => ({ ...prev, profilePhoto: photoUrl }));
+      
+      toast.dismiss('upload');
+      toast.success('Profile photo updated!');
+      
     } catch (error) {
       console.error('❌ Upload error:', error);
       toast.dismiss('upload');
-      toast.error('Failed to upload photo');
+      toast.error(error.response?.data?.error || 'Failed to upload photo');
+    } finally {
       setUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -156,27 +139,53 @@ const Profile = () => {
     navigate('/login');
   };
 
-  // ============ GET INITIALS FOR AVATAR ============
-  const getInitials = (name) => {
-    if (!name) return '?';
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-  };
+  const vehicleTypes = [
+    { value: 'sedan', label: 'Sedan' },
+    { value: 'suv', label: 'SUV' },
+    { value: 'van', label: 'Van' },
+    { value: 'hatchback', label: 'Hatchback' },
+    { value: 'motorbike', label: 'Motorbike' }
+  ];
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="max-w-2xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <button onClick={() => navigate(-1)} className="text-gray-600 hover:text-black">
+    <div className="min-h-screen bg-gray-50">
+      {/* Header - Fixed with proper layout */}
+      <header className="bg-white border-b border-gray-100 px-4 py-3 flex justify-between items-center shadow-none sticky top-0 z-30">
+        <div className="flex items-center space-x-3">
+          <button 
+            onClick={() => navigate(-1)} 
+            className="text-gray-400 hover:text-black transition-colors"
+          >
             <FaArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="text-xl font-bold">Profile</h1>
-          <button onClick={handleLogout} className="text-sm text-red-600 hover:text-red-700 flex items-center">
-            <FaSignOutAlt className="mr-1 h-4 w-4" /> Logout
+          <div className="flex items-center">
+            <FaCar className="h-6 w-6 text-black mr-2" />
+            <h1 className="text-xl font-bold text-black">Vai</h1>
+          </div>
+          <span className="text-sm text-gray-500 font-medium">
+            {user?.role === 'driver' ? 'Driver' : 'Rider'}
+          </span>
+        </div>
+        <div className="flex items-center space-x-4">
+          <button 
+            onClick={() => navigate('/history')} 
+            className="text-gray-400 hover:text-black transition-colors"
+          >
+            <FaHistory className="h-5 w-5" />
+          </button>
+          <button 
+            onClick={handleLogout} 
+            className="text-gray-400 hover:text-red-500 transition-colors"
+          >
+            <FaSignOutAlt className="h-5 w-5" />
           </button>
         </div>
+      </header>
 
-        <div className="bg-white rounded-2xl shadow-lg p-6">
+      {/* Main Content */}
+      <div className="max-w-2xl mx-auto px-4 py-6">
+        {/* Profile Card */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
           {/* Profile Photo */}
           <div className="flex flex-col items-center mb-6">
             <div className="relative">
@@ -185,7 +194,19 @@ const Profile = () => {
                 onClick={() => fileInputRef.current?.click()}
               >
                 {formData.profilePhoto ? (
-                  <img src={formData.profilePhoto} alt={formData.name} className="w-full h-full object-cover" />
+                  <img 
+                    src={formData.profilePhoto} 
+                    alt={formData.name} 
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.parentElement.innerHTML = `
+                        <div class="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-blue-500 to-purple-500 text-white">
+                          ${getInitials(formData.name)}
+                        </div>
+                      `;
+                    }}
+                  />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-blue-500 to-purple-500 text-white">
                     {getInitials(formData.name)}
@@ -286,11 +307,9 @@ const Profile = () => {
                         onChange={handleChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
                       >
-                        <option value="sedan">Sedan</option>
-                        <option value="suv">SUV</option>
-                        <option value="van">Van</option>
-                        <option value="hatchback">Hatchback</option>
-                        <option value="motorbike">Motorbike</option>
+                        {vehicleTypes.map(type => (
+                          <option key={type.value} value={type.value}>{type.label}</option>
+                        ))}
                       </select>
                     </div>
                   </div>
@@ -318,7 +337,19 @@ const Profile = () => {
             <div className="space-y-3">
               <div className="flex items-center justify-between py-2 border-b">
                 <span className="text-gray-500">Name</span>
-                <span className="font-medium">{user?.name}</span>
+                <span className="font-medium flex items-center">
+                  {user?.profilePhoto && (
+                    <img 
+                      src={user.profilePhoto} 
+                      alt={user.name} 
+                      className="w-6 h-6 rounded-full object-cover mr-2"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                      }}
+                    />
+                  )}
+                  {user?.name}
+                </span>
               </div>
               <div className="flex items-center justify-between py-2 border-b">
                 <span className="text-gray-500">Phone</span>
@@ -366,7 +397,7 @@ const Profile = () => {
         </div>
 
         {/* Ratings Section */}
-        <div className="bg-white rounded-2xl shadow-lg p-6 mt-4">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mt-4">
           <h3 className="font-bold mb-4 flex items-center">
             <FaStar className="text-yellow-500 mr-2" /> Ratings & Reviews
           </h3>
@@ -379,9 +410,10 @@ const Profile = () => {
         {/* History Button */}
         <button
           onClick={() => navigate('/history')}
-          className="w-full mt-4 py-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition flex items-center justify-center"
+          className="w-full mt-4 py-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition flex items-center justify-center text-gray-700 font-medium"
         >
           <FaHistory className="mr-2" /> View Ride History
+          <FaArrowRight className="ml-2 h-4 w-4" />
         </button>
       </div>
     </div>

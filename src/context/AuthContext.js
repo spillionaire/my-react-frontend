@@ -33,14 +33,23 @@ export const AuthProvider = ({ children }) => {
     try {
       console.log('📡 Fetching user from:', `${API_URL}/api/auth/me`);
       const response = await axios.get(`${API_URL}/api/auth/me`, {
-        timeout: 10000
+        timeout: 10000,
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
       });
       setUser(response.data);
       console.log('✅ User fetched:', response.data.name);
     } catch (error) {
       console.error('❌ Error fetching user:', error);
+      console.error('❌ Status:', error.response?.status);
+      console.error('❌ Message:', error.response?.data?.error);
+      
       if (error.response?.status === 401) {
-        logout();
+        localStorage.removeItem('token');
+        delete axios.defaults.headers.common['Authorization'];
+        setToken(null);
+        setUser(null);
       } else {
         toast.error('Failed to load user data');
       }
@@ -49,6 +58,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ============ LOGIN ============
   const login = async (email, password) => {
     try {
       console.log('🔐 Login attempt:', { email, apiUrl: API_URL });
@@ -66,6 +76,7 @@ export const AuthProvider = ({ children }) => {
         throw new Error('Invalid response from server');
       }
 
+      console.log('✅ Login successful, storing token');
       localStorage.setItem('token', token);
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       setToken(token);
@@ -74,6 +85,8 @@ export const AuthProvider = ({ children }) => {
       return { success: true, user };
     } catch (error) {
       console.error('❌ Login error:', error);
+      console.error('❌ Status:', error.response?.status);
+      console.error('❌ Message:', error.response?.data?.error);
       
       let errorMessage = 'Login failed. Please try again.';
       
@@ -85,8 +98,6 @@ export const AuthProvider = ({ children }) => {
         errorMessage = 'Invalid email or password.';
       } else if (error.response.data?.error) {
         errorMessage = error.response.data.error;
-      } else if (error.response.data?.message) {
-        errorMessage = error.response.data.message;
       }
       
       toast.error(errorMessage);
@@ -94,52 +105,51 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // In AuthContext.js
-const driverLogin = async (reference, password) => {
-  try {
-    console.log('🔐 Driver login attempt:', { reference });
-    
-    const response = await axios.post(`${API_URL}/api/auth/driver-login`, {
-      reference,
-      password,
-    }, {
-      timeout: 15000
-    });
-    
-    const { token, user } = response.data;
-    
-    if (!token || !user) {
-      throw new Error('Invalid response from server');
-    }
+  // ============ DRIVER LOGIN WITH REFERENCE ============
+  const driverLogin = async (reference, password) => {
+    try {
+      console.log('🔐 Driver login attempt:', { reference });
+      
+      const response = await axios.post(`${API_URL}/api/auth/driver-login`, {
+        reference,
+        password,
+      }, {
+        timeout: 15000
+      });
+      
+      const { token, user } = response.data;
+      
+      if (!token || !user) {
+        throw new Error('Invalid response from server');
+      }
 
-    localStorage.setItem('token', token);
-    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    setToken(token);
-    setUser(user);
-    toast.success(`Welcome, ${user.name || 'Driver'}!`);
-    return { success: true, user };
-  } catch (error) {
-    console.error('❌ Driver login error:', error);
-    console.error('❌ Response:', error.response?.data);
-    console.error('❌ Status:', error.response?.status);
-    
-    let errorMessage = 'Login failed. Please check your reference and password.';
-    
-    if (error.response?.status === 401) {
-      errorMessage = 'Invalid reference or password.';
-    } else if (error.response?.status === 403) {
-      errorMessage = 'Account not approved yet.';
-    } else if (error.response?.data?.error) {
-      errorMessage = error.response.data.error;
-    } else if (!error.response) {
-      errorMessage = 'Cannot reach server. Check your connection.';
+      localStorage.setItem('token', token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      setToken(token);
+      setUser(user);
+      toast.success(`Welcome back, ${user.name || 'Driver'}!`);
+      return { success: true, user };
+    } catch (error) {
+      console.error('❌ Driver login error:', error);
+      
+      let errorMessage = 'Login failed. Please check your reference and password.';
+      
+      if (error.code === 'ECONNABORTED') {
+        errorMessage = 'Connection timeout. Please check your internet.';
+      } else if (!error.response) {
+        errorMessage = 'Cannot reach server. Check your connection.';
+      } else if (error.response.status === 401) {
+        errorMessage = 'Invalid reference or password.';
+      } else if (error.response.data?.error) {
+        errorMessage = error.response.data.error;
+      }
+      
+      toast.error(errorMessage);
+      return { success: false, error: errorMessage };
     }
-    
-    toast.error(errorMessage);
-    return { success: false, error: errorMessage };
-  }
-};
+  };
 
+  // ============ REGISTER ============
   const register = async (userData) => {
     try {
       console.log('📝 Register attempt:', { email: userData.email });
@@ -178,7 +188,7 @@ const driverLogin = async (reference, password) => {
     }
   };
 
-  // Driver application (WhatsApp registration)
+  // ============ DRIVER APPLICATION (WhatsApp Registration) ============
   const applyAsDriver = async (applicationData) => {
     try {
       console.log('📝 Driver application:', applicationData.email);
@@ -202,7 +212,9 @@ const driverLogin = async (reference, password) => {
     }
   };
 
+  // ============ LOGOUT ============
   const logout = () => {
+    console.log('🔑 Logging out...');
     localStorage.removeItem('token');
     delete axios.defaults.headers.common['Authorization'];
     setToken(null);
@@ -210,21 +222,19 @@ const driverLogin = async (reference, password) => {
     toast.success('Logged out successfully');
   };
 
+  // ============ UPDATE USER ============
   const updateUser = (updatedData) => {
     setUser(prev => ({ ...prev, ...updatedData }));
-    // Update localStorage if needed
-    if (updatedData) {
-      localStorage.setItem('user', JSON.stringify({ ...user, ...updatedData }));
-    }
   };
 
+  // ============ VALUE OBJECT ============
   const value = {
     user,
     loading,
     token,
     login,
     driverLogin,
-    register,
+    register,        // ✅ register is defined here
     logout,
     updateUser,
     applyAsDriver,
@@ -233,5 +243,9 @@ const driverLogin = async (reference, password) => {
     isDriver: user?.role === 'driver'
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 };

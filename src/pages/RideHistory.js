@@ -16,8 +16,11 @@ import {
   FaMapMarkerAlt,
   FaFlag,
   FaSync,
-  FaFilter
+  FaFilter,
+  FaSignOutAlt,
+  FaHome
 } from 'react-icons/fa';
+import { API_URL } from '../config';
 
 const RideHistory = () => {
   const { user, logout } = useAuth();
@@ -32,7 +35,10 @@ const RideHistory = () => {
   const fetchRideHistory = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await axios.get('http://localhost:5000/api/rides/history');
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_URL}/api/rides/history`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       setRides(response.data);
     } catch (error) {
       console.error('Error fetching ride history:', error);
@@ -52,36 +58,28 @@ const RideHistory = () => {
   useEffect(() => {
     if (!socket) return;
 
-    // When a ride is completed or cancelled, refresh history
     const handleRideStatus = (data) => {
-      // Check if this ride belongs to the current user
-      const rideBelongsToUser = data.riderId === user?.id || data.driverId === user?.id;
+      const rideBelongsToUser = data.riderId === user?._id || data.driverId === user?._id;
       
       if (rideBelongsToUser && (data.status === 'completed' || data.status === 'cancelled')) {
         console.log('🔄 Ride status changed, refreshing history...');
-        // Small delay to allow backend to save
         setTimeout(() => {
           fetchRideHistory();
         }, 1000);
       }
     };
 
-    // Listen for ride status changes
     socket.on('ride-status-update', handleRideStatus);
-
-    // Also listen for ride completed event
     socket.on('ride-completed', (data) => {
-      if (data.riderId === user?.id || data.driverId === user?.id) {
+      if (data.riderId === user?._id || data.driverId === user?._id) {
         console.log('✅ Ride completed, refreshing history...');
         setTimeout(() => {
           fetchRideHistory();
         }, 1000);
       }
     });
-
-    // Listen for ride cancelled event
     socket.on('ride-cancelled', (data) => {
-      if (data.riderId === user?.id || data.driverId === user?.id) {
+      if (data.riderId === user?._id || data.driverId === user?._id) {
         console.log('❌ Ride cancelled, refreshing history...');
         setTimeout(() => {
           fetchRideHistory();
@@ -164,96 +162,96 @@ const RideHistory = () => {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <div className="bg-black text-white px-6 py-4 flex justify-between items-center shadow-lg sticky top-0 z-50">
-        <div className="flex items-center space-x-4">
+      {/* Header - Flat Twitter-style */}
+      <header className="bg-white border-b border-gray-100 px-4 py-3 flex justify-between items-center shadow-none sticky top-0 z-30">
+        <div className="flex items-center space-x-3">
           <button
             onClick={() => navigate(user?.role === 'driver' ? '/driver' : '/rider')}
-            className="text-white hover:text-gray-300 transition"
+            className="text-gray-400 hover:text-black transition-colors"
           >
             <FaArrowLeft className="h-5 w-5" />
           </button>
-          <h1 className="text-2xl font-bold">Vai</h1>
+          <div className="flex items-center">
+            <FaCar className="h-6 w-6 text-black mr-2" />
+            <h1 className="text-xl font-bold text-black">Vai</h1>
+          </div>
+          <span className="text-sm text-gray-500 font-medium">
+            History
+          </span>
         </div>
         <div className="flex items-center space-x-4">
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className={`text-sm bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded-lg transition flex items-center ${
-              refreshing ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
+            className={`text-gray-400 hover:text-black transition-colors ${refreshing ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            <FaSync className={`mr-2 ${refreshing ? 'animate-spin' : ''}`} /> 
-            {refreshing ? 'Refreshing...' : 'Refresh'}
+            <FaSync className={`h-5 w-5 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
-          <span className="text-sm bg-gray-800 px-3 py-1 rounded-full">
-            {user?.role === 'driver' ? '🚗 Driver' : '🚶 Rider'}
-          </span>
           <button
             onClick={handleLogout}
-            className="text-sm bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition"
+            className="text-gray-400 hover:text-red-500 transition-colors"
           >
-            Logout
+            <FaSignOutAlt className="h-5 w-5" />
           </button>
         </div>
-      </div>
+      </header>
 
       {/* Main Content */}
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-xl p-4 shadow hover:shadow-md transition">
+      <div className="max-w-4xl mx-auto px-3 md:px-4 py-4 md:py-8">
+        {/* Stats Cards - Mobile Responsive Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-4 md:mb-6">
+          <div className="bg-white rounded-xl p-3 md:p-4 shadow-sm border border-gray-100 hover:shadow-md transition">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Total Rides</p>
-                <p className="text-2xl font-bold">{stats.total}</p>
+                <p className="text-xs md:text-sm text-gray-500">Total Rides</p>
+                <p className="text-lg md:text-2xl font-bold">{stats.total}</p>
               </div>
-              <FaCar className="h-8 w-8 text-gray-400" />
+              <FaCar className="h-5 w-5 md:h-8 md:w-8 text-gray-400" />
             </div>
           </div>
-          <div className="bg-white rounded-xl p-4 shadow hover:shadow-md transition">
+          <div className="bg-white rounded-xl p-3 md:p-4 shadow-sm border border-gray-100 hover:shadow-md transition">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Completed</p>
-                <p className="text-2xl font-bold text-green-600">
+                <p className="text-xs md:text-sm text-gray-500">Completed</p>
+                <p className="text-lg md:text-2xl font-bold text-green-600">
                   {stats.completed}
                 </p>
               </div>
-              <FaCheck className="h-8 w-8 text-green-500" />
+              <FaCheck className="h-5 w-5 md:h-8 md:w-8 text-green-500" />
             </div>
           </div>
-          <div className="bg-white rounded-xl p-4 shadow hover:shadow-md transition">
+          <div className="bg-white rounded-xl p-3 md:p-4 shadow-sm border border-gray-100 hover:shadow-md transition">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Cancelled</p>
-                <p className="text-2xl font-bold text-red-600">
+                <p className="text-xs md:text-sm text-gray-500">Cancelled</p>
+                <p className="text-lg md:text-2xl font-bold text-red-600">
                   {stats.cancelled}
                 </p>
               </div>
-              <FaTimes className="h-8 w-8 text-red-500" />
+              <FaTimes className="h-5 w-5 md:h-8 md:w-8 text-red-500" />
             </div>
           </div>
-          <div className="bg-white rounded-xl p-4 shadow hover:shadow-md transition">
+          <div className="bg-white rounded-xl p-3 md:p-4 shadow-sm border border-gray-100 hover:shadow-md transition">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Total Spent</p>
-                <p className="text-2xl font-bold text-blue-600">
+                <p className="text-xs md:text-sm text-gray-500">Total Spent</p>
+                <p className="text-lg md:text-2xl font-bold text-blue-600">
                   R{stats.totalSpent.toFixed(2)}
                 </p>
               </div>
-              <FaMoneyBill className="h-8 w-8 text-blue-500" />
+              <FaMoneyBill className="h-5 w-5 md:h-8 md:w-8 text-blue-500" />
             </div>
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap gap-2 mb-6">
+        {/* Filters - Scrollable on mobile */}
+        <div className="flex flex-wrap gap-1.5 md:gap-2 mb-4 md:mb-6 overflow-x-auto pb-2">
           <button
             onClick={() => setFilter('all')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+            className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-medium transition whitespace-nowrap ${
               filter === 'all'
                 ? 'bg-black text-white'
-                : 'bg-white text-gray-700 hover:bg-gray-50 shadow'
+                : 'bg-white text-gray-700 hover:bg-gray-50 shadow-sm border border-gray-200'
             }`}
           >
             All
@@ -262,10 +260,10 @@ const RideHistory = () => {
             <button
               key={status}
               onClick={() => setFilter(status)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition capitalize ${
+              className={`px-3 md:px-4 py-1.5 md:py-2 rounded-lg text-xs md:text-sm font-medium transition capitalize whitespace-nowrap ${
                 filter === status
                   ? 'bg-black text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 shadow'
+                  : 'bg-white text-gray-700 hover:bg-gray-50 shadow-sm border border-gray-200'
               }`}
             >
               {status}
@@ -275,12 +273,12 @@ const RideHistory = () => {
 
         {/* Ride List */}
         {loading ? (
-          <div className="text-center py-12 bg-white rounded-xl shadow">
+          <div className="text-center py-12 bg-white rounded-xl shadow-sm border border-gray-100">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto"></div>
             <p className="mt-4 text-gray-500">Loading your rides...</p>
           </div>
         ) : filteredRides.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-xl shadow">
+          <div className="text-center py-12 bg-white rounded-xl shadow-sm border border-gray-100">
             <div className="text-6xl mb-4">🚗</div>
             <p className="text-lg text-gray-600">No rides found</p>
             <p className="text-sm text-gray-400">
@@ -294,14 +292,14 @@ const RideHistory = () => {
             </button>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-3 md:space-y-4">
             {filteredRides.map((ride) => (
-              <div key={ride._id} className="bg-white rounded-xl shadow p-6 hover:shadow-lg transition">
-                <div className="flex flex-wrap items-start justify-between gap-4">
+              <div key={ride._id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 md:p-6 hover:shadow-md transition">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     {/* Status Badge */}
-                    <div className="flex items-center space-x-3 mb-2">
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getStatusColor(ride.status)}`}>
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <span className={`px-2 md:px-3 py-0.5 md:py-1 rounded-full text-xs font-medium border ${getStatusColor(ride.status)}`}>
                         {getStatusIcon(ride.status)} {ride.status}
                       </span>
                       <span className="text-xs text-gray-500">
@@ -310,17 +308,17 @@ const RideHistory = () => {
                     </div>
 
                     {/* Ride Details */}
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 md:space-y-2">
                       <div className="flex items-start space-x-2">
-                        <FaMapMarkerAlt className="h-4 w-4 text-green-500 mt-1 flex-shrink-0" />
-                        <p className="text-sm text-gray-700">
+                        <FaMapMarkerAlt className="h-4 w-4 text-green-500 mt-0.5 flex-shrink-0" />
+                        <p className="text-sm text-gray-700 truncate">
                           <span className="font-medium">From:</span>{' '}
                           {ride.pickupLocation?.address || 'Pickup location'}
                         </p>
                       </div>
                       <div className="flex items-start space-x-2">
-                        <FaFlag className="h-4 w-4 text-red-500 mt-1 flex-shrink-0" />
-                        <p className="text-sm text-gray-700">
+                        <FaFlag className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                        <p className="text-sm text-gray-700 truncate">
                           <span className="font-medium">To:</span>{' '}
                           {ride.dropoffLocation?.address || 'Destination'}
                         </p>
@@ -328,7 +326,7 @@ const RideHistory = () => {
                     </div>
 
                     {/* Meta Info */}
-                    <div className="flex flex-wrap gap-4 mt-3 text-xs">
+                    <div className="flex flex-wrap gap-3 md:gap-4 mt-2 text-xs">
                       <span className="text-gray-500">📏 {ride.distance?.toFixed(1) || '0'} km</span>
                       <span className="text-gray-500">⏱ {ride.duration || '0'} min</span>
                       {ride.driver && (
@@ -337,22 +335,22 @@ const RideHistory = () => {
                       {ride.rider && ride.rider.name && (
                         <span className="text-gray-500">👤 {ride.rider.name}</span>
                       )}
-                      <span className="text-gray-500">💰 Cash</span>
+                      <span className="text-gray-500">💰 {ride.paymentMethod || 'Cash'}</span>
                     </div>
                   </div>
 
                   {/* Fare & Actions */}
-                  <div className="text-right">
-                    <p className="text-2xl font-bold text-green-600">R{ride.fare?.toFixed(2) || '0.00'}</p>
-                    <p className="text-xs text-gray-500 mt-1">
+                  <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:gap-1">
+                    <p className="text-xl md:text-2xl font-bold text-green-600">R{ride.fare?.toFixed(2) || '0.00'}</p>
+                    <p className="text-xs text-gray-500">
                       {ride.paymentStatus === 'paid' ? '✅ Paid' : '⏳ Pending'}
                     </p>
                     {ride.status === 'completed' && (
                       <button
                         onClick={() => toast.success('⭐ Rating feature coming soon!')}
-                        className="mt-2 text-xs bg-gray-100 hover:bg-gray-200 px-3 py-1 rounded-full transition"
+                        className="text-xs bg-gray-100 hover:bg-gray-200 px-2 md:px-3 py-1 rounded-full transition"
                       >
-                        ⭐ Rate Ride
+                        ⭐ Rate
                       </button>
                     )}
                   </div>

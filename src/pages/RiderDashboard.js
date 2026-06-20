@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMapEvents, useMap } from 'react-leaflet';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import axios from 'axios';
@@ -82,6 +82,27 @@ const carIcon = new L.Icon({
 });
 
 const SA_BOUNDS = getSouthAfricaBounds();
+
+// ============ CHANGE MAP VIEW - UPDATED ============
+function ChangeMapView({ targetLocation, zoom = 14 }) {
+  const map = useMap();
+  const [lastSnappedLocation, setLastSnappedLocation] = useState(null);
+
+  useEffect(() => {
+    if (targetLocation && targetLocation[0] && targetLocation[1]) {
+      const latLngString = `${targetLocation[0]},${targetLocation[1]}`;
+      
+      // Only snap if this location is genuinely different from the last one we snapped to
+      if (lastSnappedLocation !== latLngString) {
+        console.log('🗺️ Snapping map to:', targetLocation);
+        map.setView(targetLocation, zoom);
+        setLastSnappedLocation(latLngString);
+      }
+    }
+  }, [targetLocation, map, zoom, lastSnappedLocation]);
+
+  return null;
+}
 
 // Location Picker
 function LocationPicker({ setPickup, setPickupAddress }) {
@@ -552,7 +573,6 @@ const RiderDashboard = () => {
     setPickup(newPickup);
     setPickupAddress(item.display_name);
     setLocationMethod('manual');
-    mapRef.current?.flyTo([parseFloat(item.lat), parseFloat(item.lon)], 15);
     toast.success('📍 Pickup set');
   };
 
@@ -663,7 +683,6 @@ const RiderDashboard = () => {
             if (data.display_name) setPickupAddress(data.display_name);
           })
           .catch(() => {});
-        mapRef.current?.flyTo([location.lat, location.lng], 15);
       },
       () => {
         setIsGettingLocation(false);
@@ -720,50 +739,61 @@ const RiderDashboard = () => {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
-      {/* Header */}
-      <header className="bg-black text-white px-4 py-3 flex justify-between items-center shadow-lg z-30 flex-shrink-0">
-        <div className="flex items-center">
-          <h1 className="text-xl font-bold">🇿🇦 Vai</h1>
+      {/* Header - Smooth Flat Twitter-style */}
+      <header className="w-full bg-white border-b border-gray-100 px-4 py-3 flex justify-between items-center shadow-none z-30 flex-shrink-0">
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center">
+            <FaCar className="h-6 w-6 text-black mr-2" />
+            <h1 className="text-xl font-bold text-black">Vai</h1>
+          </div>
           <button 
             onClick={() => navigate('/profile')} 
-            className="ml-2 text-sm font-bold bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
+            className="text-sm text-gray-500 hover:text-black transition-colors font-medium"
           >
-            {user?.role === 'driver' ? '🚗 Driver' : '👤 Rider'}
+            {user?.role === 'driver' ? 'Driver' : 'Rider'}
           </button>
           {isGettingLocation && (
-            <span className="ml-2 text-[10px] bg-yellow-600 px-2 py-0.5 rounded-full animate-pulse">📍 GPS</span>
+            <span className="text-[10px] text-gray-400">📍 GPS</span>
           )}
           {isPeak && (
-            <span className="ml-2 text-[10px] bg-red-600 px-2 py-0.5 rounded-full animate-pulse">⚡ Peak</span>
-          )}
-          {driverSpeed > 0 && rideStatus === 'accepted' && (
-            <span className="ml-2 text-[10px] bg-blue-600 px-2 py-0.5 rounded-full">{Math.round(driverSpeed)} km/h</span>
+            <span className="text-[10px] text-orange-500">⚡ Peak</span>
           )}
           {driverLocation && (
-            <span className="ml-2 text-[10px] bg-green-600 px-2 py-0.5 rounded-full animate-pulse">📍 Live</span>
+            <span className="text-[10px] text-green-500">● Live</span>
+          )}
+          {driverSpeed > 0 && rideStatus === 'accepted' && (
+            <span className="text-[10px] text-blue-500">{Math.round(driverSpeed)} km/h</span>
           )}
         </div>
-        <div className="flex items-center space-x-3">
-          <button 
-            onClick={() => navigate('/history')} 
-            className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
-          >
-            History
-          </button>
+        <div className="flex items-center space-x-4">
+          {/* History - Desktop only */}
+          {!isMobile && (
+            <button 
+              onClick={() => navigate('/history')} 
+              className="text-gray-400 hover:text-black transition-colors"
+            >
+              <FaHistory className="h-5 w-5" />
+            </button>
+          )}
           <button 
             onClick={requestDriverLocation}
-            className="text-xs bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded-lg transition"
+            className="text-gray-400 hover:text-blue-500 transition-colors"
           >
-            📍 Get Driver
+            <FaCrosshairs className="h-5 w-5" />
           </button>
+          {/* Debug */}
           <button 
             onClick={() => setShowDebug(!showDebug)} 
-            className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded-lg transition"
+            className="text-gray-400 hover:text-black transition-colors"
           >
-            <FaBug className="inline mr-1" /> Debug
+            <FaBug className="h-5 w-5" />
           </button>
-          <button onClick={handleLogout} className="text-xs bg-red-600 hover:bg-red-700 px-3 py-1 rounded-lg transition">
-            Logout
+          {/* Logout */}
+          <button 
+            onClick={handleLogout} 
+            className="text-gray-400 hover:text-red-500 transition-colors"
+          >
+            <FaSignOutAlt className="h-5 w-5" />
           </button>
         </div>
       </header>
@@ -794,8 +824,11 @@ const RiderDashboard = () => {
             }}
           />
           
+          {/* Updated ChangeMapView with targetLocation */}
+          <ChangeMapView targetLocation={[pickup.lat, pickup.lng]} zoom={14} />
           <LocationPicker setPickup={setPickup} setPickupAddress={setPickupAddress} />
           
+          {/* Pickup Marker */}
           <Marker position={[pickup.lat, pickup.lng]} icon={pickupIcon}>
             <Popup>
               <p className="font-bold text-green-600">📍 Pickup</p>
@@ -803,6 +836,7 @@ const RiderDashboard = () => {
             </Popup>
           </Marker>
           
+          {/* Dropoff Marker */}
           <Marker position={[dropoff.lat, dropoff.lng]} icon={dropoffIcon}>
             <Popup>
               <p className="font-bold text-red-600">🏁 Dropoff</p>
@@ -810,6 +844,7 @@ const RiderDashboard = () => {
             </Popup>
           </Marker>
           
+          {/* Driver Car Marker */}
           {driverLocation && currentRide && rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
             <Marker 
               position={[driverLocation.lat, driverLocation.lng]} 
@@ -845,6 +880,7 @@ const RiderDashboard = () => {
             </Marker>
           )}
           
+          {/* Driver route line (driver to pickup) */}
           {driverRoute.length > 0 && currentRide && rideStatus === 'accepted' && (
             <Polyline 
               positions={driverRoute.map(p => [p.lat, p.lng])} 
@@ -852,6 +888,20 @@ const RiderDashboard = () => {
               weight={3} 
               opacity={0.7} 
               dashArray="8, 6"
+            />
+          )}
+          
+          {/* Pickup to Dropoff Route Line - Always visible */}
+          {currentRide && currentRide.pickupLocation && currentRide.dropoffLocation && rideStatus !== 'cancelled' && (
+            <Polyline 
+              positions={[
+                [currentRide.pickupLocation.lat, currentRide.pickupLocation.lng],
+                [currentRide.dropoffLocation.lat, currentRide.dropoffLocation.lng]
+              ]} 
+              color="#eab308"
+              weight={3} 
+              opacity={0.5}
+              dashArray="10, 8"
             />
           )}
         </MapContainer>
@@ -897,7 +947,7 @@ const RiderDashboard = () => {
 
         {/* ============ MOBILE: INPUT SHEET ============ */}
         {isMobile && !currentRide && (
-          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl p-3 z-30 border-t border-gray-200 safe-area-bottom" style={{ marginBottom: '56px' }}>
+          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-3 z-30 border-t border-gray-100 safe-area-bottom" style={{ marginBottom: '56px' }}>
             <div className="flex items-center space-x-2">
               <button
                 onClick={updateLocation}
@@ -958,7 +1008,7 @@ const RiderDashboard = () => {
 
         {/* ============ MOBILE: RIDE STATUS SHEET ============ */}
         {isMobile && currentRide && rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
-          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-2xl p-4 z-30 border-t border-gray-200 safe-area-bottom" style={{ marginBottom: '56px' }}>
+          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-4 z-30 border-t border-gray-100 safe-area-bottom" style={{ marginBottom: '56px' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <div className={`w-2.5 h-2.5 rounded-full ${
@@ -1487,31 +1537,31 @@ const RiderDashboard = () => {
         />
       )}
 
-      {/* Bottom Navigation - Mobile */}
+      {/* Bottom Navigation - Mobile Twitter-style */}
       {isMobile && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 safe-area-bottom">
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-bottom">
           <div className="flex items-center justify-around h-14 max-w-screen-lg mx-auto px-4">
             <button
               onClick={() => setShowPaymentModal(true)}
-              className="flex flex-col items-center justify-center text-gray-400 hover:text-gray-600"
+              className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors"
             >
               <FaWallet className="h-5 w-5" />
-              <span className="text-[9px] mt-0.5">Payment</span>
+              <span className="text-[9px] mt-0.5 text-gray-400">Payment</span>
             </button>
             <button
               onClick={requestRide}
               disabled={isRequesting || !destination || distance === 0}
-              className="flex flex-col items-center justify-center w-12 h-12 bg-black text-white rounded-full shadow-lg -mt-6 transition hover:bg-gray-800 disabled:opacity-50"
+              className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors disabled:opacity-50"
             >
-              <FaCar className="h-5 w-5" />
-              <span className="text-[8px] mt-0.5 font-medium">Ride</span>
+              <FaCar className="h-6 w-6 text-black" />
+              <span className="text-[9px] mt-0.5 font-medium text-black">Ride</span>
             </button>
             <button
               onClick={() => navigate('/history')}
-              className="flex flex-col items-center justify-center text-gray-400 hover:text-gray-600"
+              className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors"
             >
               <FaHistory className="h-5 w-5" />
-              <span className="text-[9px] mt-0.5">History</span>
+              <span className="text-[9px] mt-0.5 text-gray-400">History</span>
             </button>
           </div>
         </div>
