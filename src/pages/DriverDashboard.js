@@ -292,7 +292,7 @@ const DriverDashboard = () => {
     });
   }, []);
 
-  // ============ START WATCHING LOCATION - FIXED ============
+  // ============ START WATCHING LOCATION ============
   const startWatchingLocation = () => {
     if (watchIdRef.current) {
       navigator.geolocation.clearWatch(watchIdRef.current);
@@ -300,7 +300,7 @@ const DriverDashboard = () => {
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
-        // 👇 GUARD CLAUSE - Prevents undefined driverId
+        // 👇 GUARD CLAUSE
         if (!user || !user._id) {
           console.log("⏳ Waiting for user authorization context to fully load...");
           return;
@@ -379,10 +379,10 @@ const DriverDashboard = () => {
           });
         }
 
-        // ============ FIX: Use user._id (NOT user.id) ============
+        // ✅ FIXED: user._id NOT user.id
         if (socket) {
           socket.emit('driver-location', {
-            driverId: user?._id,  // ✅ Fixed: _id not id
+            driverId: user?._id,
             location,
             rotation: carRotation,
             speed: position.coords.speed || 0,
@@ -486,12 +486,13 @@ const DriverDashboard = () => {
       setShowManualArrival(false);
       setRideStatus('arrived');
       
+      // ✅ FIXED: user._id NOT user.id
       if (socket) {
         socket.emit('update-ride-status', {
           rideId: currentRide._id,
           status: 'arrived',
           riderId: currentRide.rider?._id,
-          driverId: user._id
+          driverId: user?._id
         });
       }
       
@@ -585,12 +586,13 @@ const DriverDashboard = () => {
       setRideStatus('completed');
       toast.success('✅ Ride completed!');
 
+      // ✅ FIXED: user._id NOT user.id
       if (socket) {
         socket.emit('update-ride-status', {
           rideId: currentRide._id,
           status: 'completed',
           riderId: currentRide.rider?._id,
-          driverId: user._id
+          driverId: user?._id
         });
       }
 
@@ -649,23 +651,24 @@ const DriverDashboard = () => {
       setIsLoading(true);
       await axios.put(`${API_URL}/api/drivers/cancel-ride/${currentRide._id}`);
       
+      // ✅ ALL FIXED: user._id NOT user.id
       if (socket) {
         socket.emit('cancel-ride', { 
           rideId: currentRide._id,
           riderId: currentRide.rider?._id,
-          driverId: user._id
+          driverId: user?._id
         });
         
         socket.emit('ride-driver-cancelled', {
           rideId: currentRide._id,
           riderId: currentRide.rider?._id,
-          driverId: user._id,
+          driverId: user?._id,
           driverName: user.name
         });
         
         socket.emit(`rider-${currentRide.rider?._id}-driver-cancelled`, {
           rideId: currentRide._id,
-          driverId: user._id,
+          driverId: user?._id,
           driverName: user.name
         });
       }
@@ -842,12 +845,13 @@ const DriverDashboard = () => {
       if (started) {
         setRideStatus('in-progress');
         
+        // ✅ FIXED: user._id NOT user.id
         if (socket) {
           socket.emit('update-ride-status', {
             rideId: currentRide._id,
             status: 'in-progress',
             riderId: currentRide.rider?._id,
-            driverId: user._id
+            driverId: user?._id
           });
         }
         
@@ -1621,11 +1625,11 @@ const DriverDashboard = () => {
                 <button
                   onClick={toggleAvailability}
                   disabled={isLoading}
-                  className={`flex flex-col items-center justify-center w-12 h-12 rounded-full shadow-lg -mt-6 transition ${(
+                  className={`flex flex-col items-center justify-center w-12 h-12 rounded-full shadow-lg -mt-6 transition ${
                     isAvailable
                       ? 'bg-green-600 text-white hover:bg-green-700'
                       : 'bg-gray-600 text-white hover:bg-gray-700'
-                  )} disabled:opacity-50`}
+                  } disabled:opacity-50`}
                 >
                   {isAvailable ? '●' : '○'}
                   <span className="text-[8px] mt-0.5 font-medium">
