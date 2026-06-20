@@ -22,7 +22,8 @@ import {
   FaBug,
   FaCreditCard,
   FaMoneyBillWave,
-  FaWallet
+  FaWallet,
+  FaStar
 } from 'react-icons/fa';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -43,6 +44,7 @@ import {
 } from '../utils/navigation';
 import { getCarIconUrl } from '../assets/car-icon';
 import Chat from '../components/Chat';
+import RatingModal from '../components/RatingModal';
 import { API_URL } from '../config';
 import { getLocationWithFallback, isGPSAvailable, isHTTPSRequired, getGPSErrorMessage } from '../utils/location';
 
@@ -83,7 +85,7 @@ const carIcon = new L.Icon({
 
 const SA_BOUNDS = getSouthAfricaBounds();
 
-// ============ CHANGE MAP VIEW - UPDATED ============
+// ============ CHANGE MAP VIEW - SMART SNAPPING ============
 function ChangeMapView({ targetLocation, zoom = 14 }) {
   const map = useMap();
   const [lastSnappedLocation, setLastSnappedLocation] = useState(null);
@@ -91,8 +93,6 @@ function ChangeMapView({ targetLocation, zoom = 14 }) {
   useEffect(() => {
     if (targetLocation && targetLocation[0] && targetLocation[1]) {
       const latLngString = `${targetLocation[0]},${targetLocation[1]}`;
-      
-      // Only snap if this location is genuinely different from the last one we snapped to
       if (lastSnappedLocation !== latLngString) {
         console.log('🗺️ Snapping map to:', targetLocation);
         map.setView(targetLocation, zoom);
@@ -104,10 +104,14 @@ function ChangeMapView({ targetLocation, zoom = 14 }) {
   return null;
 }
 
-// Location Picker
-function LocationPicker({ setPickup, setPickupAddress }) {
+// ============ LOCATION PICKER - DISABLED DURING ACTIVE RIDE ============
+function LocationPicker({ setPickup, setPickupAddress, isRideActive }) {
   useMapEvents({
     click(e) {
+      if (isRideActive) {
+        toast.error('Cannot change pickup during active ride', { icon: '🚗' });
+        return;
+      }
       const { lat, lng } = e.latlng;
       setPickup({ lat, lng });
       fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`)
@@ -270,6 +274,10 @@ const RiderDashboard = () => {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [tileLoading, setTileLoading] = useState(true);
+  
+  // Rating Modal
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [rideToRate, setRideToRate] = useState(null);
   
   // Responsive detection
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -468,6 +476,11 @@ const RiderDashboard = () => {
         setDriverRoute([]);
       } else if (status === 'completed') {
         toast.success('✅ Ride completed!');
+        // Show rating modal after completion
+        setTimeout(() => {
+          setRideToRate(currentRide);
+          setShowRatingModal(true);
+        }, 2000);
         setTimeout(() => {
           setCurrentRide(null);
           setRideStatus(null);
@@ -737,6 +750,9 @@ const RiderDashboard = () => {
     { id: 'wallet', label: 'Wallet', icon: FaWallet }
   ];
 
+  // Check if ride is active
+  const isRideActive = currentRide && rideStatus !== 'completed' && rideStatus !== 'cancelled';
+
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
       {/* Header - Smooth Flat Twitter-style */}
@@ -824,9 +840,14 @@ const RiderDashboard = () => {
             }}
           />
           
-          {/* Updated ChangeMapView with targetLocation */}
           <ChangeMapView targetLocation={[pickup.lat, pickup.lng]} zoom={14} />
-          <LocationPicker setPickup={setPickup} setPickupAddress={setPickupAddress} />
+          
+          {/* LocationPicker - Disabled during active ride */}
+          <LocationPicker 
+            setPickup={setPickup} 
+            setPickupAddress={setPickupAddress} 
+            isRideActive={isRideActive}
+          />
           
           {/* Pickup Marker */}
           <Marker position={[pickup.lat, pickup.lng]} icon={pickupIcon}>
@@ -1021,6 +1042,16 @@ const RiderDashboard = () => {
               </div>
               <span className="text-lg font-bold text-green-600">R{currentRide.fare?.toFixed(2)}</span>
             </div>
+
+            {/* Trip Reference */}
+            {currentRide?.tripReference && (
+              <div className="flex justify-between items-center bg-gray-50 px-3 py-1.5 rounded-lg mb-2">
+                <span className="text-xs text-gray-500">Trip Reference</span>
+                <span className="text-xs font-mono font-medium bg-white px-2 py-0.5 rounded border border-gray-200">
+                  {currentRide.tripReference}
+                </span>
+              </div>
+            )}
 
             {driverInfo && rideStatus === 'accepted' && (
               <div className="mt-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
@@ -1340,6 +1371,16 @@ const RiderDashboard = () => {
                         <span className="font-medium capitalize">{currentRide.paymentMethod || 'Cash'}</span>
                       </div>
                       
+                      {/* Trip Reference */}
+                      {currentRide?.tripReference && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Trip Reference</span>
+                          <span className="font-mono font-medium text-xs bg-gray-100 px-2 py-0.5 rounded">
+                            {currentRide.tripReference}
+                          </span>
+                        </div>
+                      )}
+                      
                       {driverInfo && rideStatus === 'accepted' && (
                         <div className="pt-2 border-t">
                           <p className="text-xs font-medium text-gray-700 mb-2">Driver Information</p>
@@ -1524,6 +1565,21 @@ const RiderDashboard = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Rating Modal */}
+      {showRatingModal && rideToRate && (
+        <RatingModal
+          rideId={rideToRate._id}
+          userRole="rider"
+          onClose={() => {
+            setShowRatingModal(false);
+            setRideToRate(null);
+          }}
+          onSubmitted={() => {
+            toast.success('Rating submitted!');
+          }}
+        />
       )}
 
       {/* Chat Component */}

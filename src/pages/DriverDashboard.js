@@ -41,6 +41,7 @@ import {
 } from '../utils/navigation';
 import { getCarIconUrl } from '../assets/car-icon';
 import Chat from '../components/Chat';
+import RatingModal from '../components/RatingModal';
 import { API_URL } from '../config';
 import { getLocationWithFallback, isGPSAvailable, isHTTPSRequired, getGPSErrorMessage } from '../utils/location';
 
@@ -94,7 +95,7 @@ const EARLY_COMPLETION_REASONS = [
   { id: 'other', label: 'Other reason' }
 ];
 
-// ============ CHANGE MAP VIEW - UPDATED ============
+// ============ CHANGE MAP VIEW - SMART SNAPPING ============
 function ChangeMapView({ targetLocation, zoom = 15 }) {
   const map = useMap();
   const [lastSnappedLocation, setLastSnappedLocation] = useState(null);
@@ -102,8 +103,6 @@ function ChangeMapView({ targetLocation, zoom = 15 }) {
   useEffect(() => {
     if (targetLocation && targetLocation[0] && targetLocation[1]) {
       const latLngString = `${targetLocation[0]},${targetLocation[1]}`;
-      
-      // Only snap if this location is genuinely different from the last one we snapped to
       if (lastSnappedLocation !== latLngString) {
         console.log('🗺️ Snapping map to:', targetLocation);
         map.setView(targetLocation, zoom);
@@ -178,6 +177,10 @@ const DriverDashboard = () => {
   const [rideStartLocation, setRideStartLocation] = useState(null);
   const [rideStartTime, setRideStartTime] = useState(null);
   const [rideDistanceTraveled, setRideDistanceTraveled] = useState(0);
+  
+  // Rating Modal
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [rideToRate, setRideToRate] = useState(null);
   
   const watchIdRef = useRef(null);
   const mapRef = useRef();
@@ -321,7 +324,6 @@ const DriverDashboard = () => {
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
-        // 👇 GUARD CLAUSE - Prevents undefined driverId
         if (!user || !user._id) {
           console.log("⏳ Waiting for user authorization context to fully load...");
           return;
@@ -350,7 +352,6 @@ const DriverDashboard = () => {
         setCurrentLocation(location);
         setMapCenter(location);
 
-        // Track distance traveled during ride
         if (rideStatus === 'in-progress' && rideStartLocation) {
           const dist = calculateDistance(
             rideStartLocation.lat,
@@ -361,12 +362,10 @@ const DriverDashboard = () => {
           setRideDistanceTraveled(dist);
         }
 
-        // AUTO-ARRIVAL CHECK
         if (currentRide && rideStatus === 'accepted' && !arrivalChecked) {
           checkArrival(location);
         }
 
-        // Update ETA to pickup
         if (currentRide && rideStatus === 'accepted') {
           const pickupDist = calculateDistance(
             location.lat, location.lng,
@@ -400,7 +399,6 @@ const DriverDashboard = () => {
           });
         }
 
-        // ============ FIX: Use user._id (NOT user.id) ============
         if (socket) {
           socket.emit('driver-location', {
             driverId: user?._id,
@@ -507,7 +505,6 @@ const DriverDashboard = () => {
       setShowManualArrival(false);
       setRideStatus('arrived');
       
-      // ✅ FIXED: user._id NOT user.id
       if (socket) {
         socket.emit('update-ride-status', {
           rideId: currentRide._id,
@@ -607,7 +604,6 @@ const DriverDashboard = () => {
       setRideStatus('completed');
       toast.success('✅ Ride completed!');
 
-      // ✅ FIXED: user._id NOT user.id
       if (socket) {
         socket.emit('update-ride-status', {
           rideId: currentRide._id,
@@ -620,6 +616,12 @@ const DriverDashboard = () => {
       setShowEarlyCompletionModal(false);
       setEarlyCompletionReason('');
       setEarlyCompletionNote('');
+
+      // Show rating modal after completion
+      setTimeout(() => {
+        setRideToRate(currentRide);
+        setShowRatingModal(true);
+      }, 2000);
 
       setTimeout(() => {
         setCurrentRide(null);
@@ -672,7 +674,6 @@ const DriverDashboard = () => {
       setIsLoading(true);
       await axios.put(`${API_URL}/api/drivers/cancel-ride/${currentRide._id}`);
       
-      // ✅ ALL FIXED: user._id NOT user.id
       if (socket) {
         socket.emit('cancel-ride', { 
           rideId: currentRide._id,
@@ -866,7 +867,6 @@ const DriverDashboard = () => {
       if (started) {
         setRideStatus('in-progress');
         
-        // ✅ FIXED: user._id NOT user.id
         if (socket) {
           socket.emit('update-ride-status', {
             rideId: currentRide._id,
@@ -981,6 +981,13 @@ const DriverDashboard = () => {
         setRideStartLocation(null);
         setRideStartTime(null);
         setRideDistanceTraveled(0);
+        
+        // Show rating modal after completion
+        setTimeout(() => {
+          setRideToRate(currentRide);
+          setShowRatingModal(true);
+        }, 2000);
+        
         setTimeout(() => {
           setCurrentRide(null);
           setRideStatus(null);
@@ -1824,6 +1831,16 @@ const DriverDashboard = () => {
                       <span className="font-medium">{currentRide.distance?.toFixed(1) || '0'} km</span>
                     </div>
                     
+                    {/* Trip Reference */}
+                    {currentRide?.tripReference && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Trip Reference</span>
+                        <span className="font-mono font-medium text-xs bg-gray-100 px-2 py-0.5 rounded">
+                          {currentRide.tripReference}
+                        </span>
+                      </div>
+                    )}
+                    
                     {/* Rider Information */}
                     {riderInfo && (
                       <div className="pt-2 border-t">
@@ -2055,6 +2072,21 @@ const DriverDashboard = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Rating Modal */}
+      {showRatingModal && rideToRate && (
+        <RatingModal
+          rideId={rideToRate._id}
+          userRole="driver"
+          onClose={() => {
+            setShowRatingModal(false);
+            setRideToRate(null);
+          }}
+          onSubmitted={() => {
+            toast.success('Rating submitted!');
+          }}
+        />
       )}
 
       {/* Chat Component */}
