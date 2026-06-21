@@ -250,7 +250,7 @@ const RiderDashboard = () => {
   const [isPeak, setIsPeak] = useState(isPeakHour());
   const [isLoading, setIsLoading] = useState(false);
   
-  // ROUTING STATE - with persistence
+  // ROUTING STATE
   const [routeData, setRouteData] = useState(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   
@@ -286,8 +286,22 @@ const RiderDashboard = () => {
   // Responsive detection
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const mapRef = useRef();
+  const serviceTypes = getServiceTypes();
+  const locationAttempted = useRef(false);
+  const activeRideFetched = useRef(false);
+  const locationRequestInterval = useRef(null);
+  const routeCalculationTimeout = useRef(null);
+
   // ============ PERSIST ROUTE DATA ============
-  // Save route data to localStorage whenever it changes
   useEffect(() => {
     if (routeData) {
       try {
@@ -338,21 +352,6 @@ const RiderDashboard = () => {
     }
   }, []);
 
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  const mapRef = useRef();
-  const serviceTypes = getServiceTypes();
-  const locationAttempted = useRef(false);
-  const activeRideFetched = useRef(false);
-  const locationRequestInterval = useRef(null);
-  const routeCalculationTimeout = useRef(null);
-
   // Fetch active ride on load
   useEffect(() => {
     const fetchActiveRide = async () => {
@@ -381,7 +380,6 @@ const RiderDashboard = () => {
             setDestination(ride.dropoffLocation.address || 'Destination');
           }
           
-          // Restore route points from ride if available
           if (ride.routePoints && ride.routePoints.length > 0) {
             const restoredRoute = {
               points: ride.routePoints,
@@ -488,13 +486,9 @@ const RiderDashboard = () => {
         autoCalculateRoute();
       }, 800);
     } else {
-      // Don't clear route data - keep it persisted
-      if (isDefaultPickup || isDefaultDropoff) {
-        // Only clear if both are default
-        if (isDefaultPickup && isDefaultDropoff) {
-          setRouteData(null);
-          localStorage.removeItem('riderRouteData');
-        }
+      if (isDefaultPickup && isDefaultDropoff) {
+        setRouteData(null);
+        localStorage.removeItem('riderRouteData');
       }
     }
 
@@ -562,8 +556,9 @@ const RiderDashboard = () => {
         const fareData = calculateFareSA(route.distance, 'johannesburg', isPeak, selectedService);
         setFareBreakdown(fareData.breakdown);
         
+        // Fix: Use toast with icon instead of toast.warning
         if (route.isFallback) {
-          toast.warning('Using approximate route (OSM unavailable)');
+          toast('Using approximate route (OSM unavailable)', { icon: '⚠️' });
         }
       } else {
         console.error('❌ Route API returned error:', response.data);
@@ -815,7 +810,7 @@ const RiderDashboard = () => {
         serviceType: selectedService,
         isPeak: isPeak,
         paymentMethod: selectedPayment,
-        routePoints: routeData.points || [] // Store route points in ride
+        routePoints: routeData.points || []
       });
 
       const ride = response.data.ride;
@@ -917,7 +912,6 @@ const RiderDashboard = () => {
   };
 
   const handleLogout = () => {
-    // Clear persisted route data on logout
     localStorage.removeItem('riderRouteData');
     localStorage.removeItem('riderPickup');
     localStorage.removeItem('riderDropoff');
@@ -969,7 +963,6 @@ const RiderDashboard = () => {
   // Check if ride is active
   const isRideActive = currentRide && rideStatus !== 'completed' && rideStatus !== 'cancelled';
 
-  // Render the map and UI - same as before but with routeData persistence
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
       {/* Header */}
@@ -1033,7 +1026,7 @@ const RiderDashboard = () => {
         <MapContainer
           center={[pickup.lat, pickup.lng]}
           zoom={14}
-          style={{ height: '100%', width: '100%' }}
+          style={{ height: '100%', width: '100%', paddingBottom: isMobile ? '130px' : '0' }}
           ref={mapRef}
           minZoom={5}
           maxBounds={[
@@ -1191,9 +1184,10 @@ const RiderDashboard = () => {
           </div>
         )}
 
-        {/* ============ MOBILE: INPUT SHEET ============ */}
+        {/* ============ MOBILE: INPUT SHEET - FIXED ============ */}
         {isMobile && !currentRide && (
-          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-3 z-30 border-t border-gray-100 safe-area-bottom" style={{ marginBottom: '56px' }}>
+          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-3 z-30 border-t border-gray-100 safe-area-bottom" 
+               style={{ marginBottom: '70px', paddingBottom: '12px' }}>
             <div className="flex items-center space-x-2">
               <button
                 onClick={updateLocation}
@@ -1216,12 +1210,7 @@ const RiderDashboard = () => {
                   setValue={setDestination}
                 />
               </div>
-              <button
-                onClick={() => setShowPaymentModal(true)}
-                className="p-2 bg-gray-200 text-black rounded-lg hover:bg-gray-300 transition flex-shrink-0"
-              >
-                <FaWallet className="h-5 w-5" />
-              </button>
+              {/* Request Ride Button - Mobile */}
               <button
                 onClick={requestRide}
                 disabled={isRequesting || !destination || distance === 0 || isGettingLocation || !routeData}
@@ -1257,7 +1246,8 @@ const RiderDashboard = () => {
 
         {/* ============ MOBILE: RIDE STATUS SHEET ============ */}
         {isMobile && currentRide && rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
-          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-4 z-30 border-t border-gray-100 safe-area-bottom" style={{ marginBottom: '56px' }}>
+          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-4 z-30 border-t border-gray-100 safe-area-bottom" 
+               style={{ marginBottom: '70px', paddingBottom: '12px' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <div className={`w-2.5 h-2.5 rounded-full ${
@@ -1828,7 +1818,7 @@ const RiderDashboard = () => {
 
       {/* Bottom Navigation - Mobile */}
       {isMobile && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-bottom">
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-bottom" style={{ height: '60px' }}>
           <div className="flex items-center justify-around h-14 max-w-screen-lg mx-auto px-4">
             <button
               onClick={() => setShowPaymentModal(true)}
