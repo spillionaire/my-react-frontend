@@ -1,37 +1,20 @@
+// frontend/src/utils/pricing.js
+
 // South African Pricing for Vai
-// Based on real Uber and Bolt data from South Africa
+// Updated: R10 min fare, R3-R5 per km (sliding scale), peak 20%
 
-// City-specific rates per km (ZAR)
-const CITY_RATES = {
-  'johannesburg': 8.50,
-  'pretoria': 8.50,
-  'capetown': 9.50,
-  'durban': 10.00,
-  'gqeberha': 9.50,
-  'east london': 9.00,
-  'bloemfontein': 8.50,
-  'nelspruit': 8.50,
-  'default': 9.00
-};
+// ============ PRICING STRUCTURE ============
+// Minimum fare: R10
+// Rate per km: R3 (min) - R5 (max) based on distance
+// Peak surcharge: 20% (includes booking fee)
 
-// City-specific base fares (ZAR)
-const CITY_BASE_FARES = {
-  'johannesburg': 25.00,
-  'pretoria': 25.00,
-  'capetown': 28.00,
-  'durban': 26.00,
-  'gqeberha': 25.00,
-  'east london': 24.00,
-  'bloemfontein': 23.00,
-  'nelspruit': 23.00,
-  'default': 25.00
-};
+const MIN_FARE = 10.0;
+const MIN_RATE_PER_KM = 3.0;
+const MAX_RATE_PER_KM = 5.0;
 
-// Per minute rate (ZAR)
-const PER_MINUTE_RATE = 0.60;
-
-// Booking fee percentage
-const BOOKING_FEE_PERCENT = 0.04; // 4%
+// Distance thresholds for sliding scale
+const SHORT_DISTANCE_THRESHOLD = 5; // km - below this, rate is higher
+const LONG_DISTANCE_THRESHOLD = 20; // km - above this, rate is lower
 
 // Peak hours (24-hour format)
 const PEAK_HOURS = {
@@ -39,69 +22,98 @@ const PEAK_HOURS = {
   evening: { start: 16, end: 19 }
 };
 
-// Surge multiplier
-const SURGE_MULTIPLIER = 1.3; // 30% during peak
+// Peak surcharge (includes booking fee)
+const PEAK_SURCHARGE = 0.20; // 20%
+
+/**
+ * Calculate rate per km based on distance (sliding scale)
+ * Short distances: higher rate (closer to R5)
+ * Long distances: lower rate (closer to R3)
+ * 
+ * @param {number} distanceKm - Distance in kilometers
+ * @returns {number} Rate per km
+ */
+const getRatePerKm = (distanceKm) => {
+  if (distanceKm <= SHORT_DISTANCE_THRESHOLD) {
+    // Short distances: R5 per km
+    return MAX_RATE_PER_KM;
+  } else if (distanceKm >= LONG_DISTANCE_THRESHOLD) {
+    // Long distances: R3 per km
+    return MIN_RATE_PER_KM;
+  } else {
+    // Sliding scale between R5 and R3
+    const range = LONG_DISTANCE_THRESHOLD - SHORT_DISTANCE_THRESHOLD;
+    const position = (distanceKm - SHORT_DISTANCE_THRESHOLD) / range;
+    return MAX_RATE_PER_KM - (position * (MAX_RATE_PER_KM - MIN_RATE_PER_KM));
+  }
+};
 
 /**
  * Calculate fare for a ride in South Africa
+ * PRICING: R10 min fare, R3-R5 per km (sliding scale), peak 20%
+ * 
  * @param {number} distanceKm - Distance in kilometers
- * @param {string} city - City name (e.g., 'johannesburg', 'capetown')
+ * @param {string} city - City name - kept for compatibility
  * @param {boolean} isPeak - Whether it's peak hour
- * @param {string} serviceType - 'standard', 'economy', 'premium'
+ * @param {string} serviceType - 'economy', 'standard', 'premium', 'van'
  * @returns {Object} Fare breakdown
  */
 export const calculateFareSA = (distanceKm, city = 'johannesburg', isPeak = false, serviceType = 'standard') => {
-  // Get city-specific rates
-  const cityKey = city.toLowerCase().trim();
-  const perKmRate = CITY_RATES[cityKey] || CITY_RATES.default;
-  const baseFare = CITY_BASE_FARES[cityKey] || CITY_BASE_FARES.default;
-
   // Service type multipliers
   const serviceMultipliers = {
-    'economy': 0.85,    // 15% cheaper
-    'standard': 1.0,    // Base price
-    'premium': 1.4,     // 40% more expensive
-    'moto': 0.5         // 50% cheaper
+    'economy': 0.8,    // 20% cheaper
+    'standard': 1.0,   // Base price
+    'premium': 1.5,    // 50% more expensive
+    'van': 1.3         // 30% more expensive (7-seater)
   };
   const serviceMultiplier = serviceMultipliers[serviceType] || 1.0;
 
-  // Calculate time-based charge (2 min per km average)
-  const estimatedMinutes = distanceKm * 2;
-  const timeCharge = estimatedMinutes * PER_MINUTE_RATE;
+  // Get rate per km based on distance (sliding scale)
+  const ratePerKm = getRatePerKm(distanceKm);
 
-  // Calculate base fare
-  let fare = baseFare + (distanceKm * perKmRate * serviceMultiplier) + timeCharge;
+  // Calculate base fare: distance * rate per km
+  let fare = distanceKm * ratePerKm;
 
-  // Apply surge pricing during peak hours
+  // Apply service multiplier
+  fare = fare * serviceMultiplier;
+
+  // Apply peak surcharge (20% - includes booking fee)
   if (isPeak) {
-    fare = fare * SURGE_MULTIPLIER;
+    fare = fare * (1 + PEAK_SURCHARGE);
   }
 
-  // Add booking fee
-  const bookingFee = fare * BOOKING_FEE_PERCENT;
-  fare = fare + bookingFee;
+  // Apply minimum fare
+  fare = Math.max(MIN_FARE, fare);
 
-  // Round to nearest Rand (South African currency)
-  const roundedFare = Math.round(fare);
+  // Round to 2 decimal places
+  const finalFare = Math.round(fare * 100) / 100;
 
-  // Ensure minimum fare
-  const minFare = serviceType === 'moto' ? 18 : 25;
-  const finalFare = Math.max(roundedFare, minFare);
+  // Calculate breakdown
+  const baseFare = Math.round((distanceKm * ratePerKm) * 100) / 100;
+  const serviceCharge = Math.round((distanceKm * ratePerKm * (serviceMultiplier - 1)) * 100) / 100;
+  const peakSurcharge = isPeak ? Math.round((distanceKm * ratePerKm * serviceMultiplier * PEAK_SURCHARGE) * 100) / 100 : 0;
 
   return {
     total: finalFare,
     breakdown: {
-      baseFare: Math.round(baseFare),
-      distanceCharge: Math.round(distanceKm * perKmRate * serviceMultiplier),
-      timeCharge: Math.round(timeCharge),
-      bookingFee: Math.round(bookingFee),
-      surgeMultiplier: isPeak ? SURGE_MULTIPLIER : 1.0,
-      serviceMultiplier: serviceMultiplier
+      baseFare: baseFare,
+      distanceCharge: Math.round(distanceKm * ratePerKm * serviceMultiplier * 100) / 100,
+      serviceCharge: serviceCharge,
+      peakSurcharge: peakSurcharge,
+      serviceMultiplier: serviceMultiplier,
+      ratePerKm: ratePerKm,
+      minFareApplied: finalFare === MIN_FARE
     },
     distance: distanceKm,
-    city: cityKey,
+    city: city.toLowerCase().trim(),
     isPeak: isPeak,
-    serviceType: serviceType
+    serviceType: serviceType,
+    perKm: ratePerKm,
+    minFare: MIN_FARE,
+    minRatePerKm: MIN_RATE_PER_KM,
+    maxRatePerKm: MAX_RATE_PER_KM,
+    peakSurchargePercent: PEAK_SURCHARGE * 100,
+    currency: 'ZAR'
   };
 };
 
@@ -112,6 +124,11 @@ export const calculateFareSA = (distanceKm, city = 'johannesburg', isPeak = fals
 export const isPeakHour = () => {
   const now = new Date();
   const hour = now.getHours();
+  const day = now.getDay();
+  
+  // Only weekdays (Monday-Friday)
+  const isWeekday = day >= 1 && day <= 5;
+  if (!isWeekday) return false;
   
   const { morning, evening } = PEAK_HOURS;
   
@@ -146,10 +163,10 @@ export const formatCurrency = (amount) => {
  */
 export const getServiceTypes = () => {
   return [
-    { id: 'economy', name: 'Vai Go', description: 'Budget-friendly', multiplier: 0.85 },
+    { id: 'economy', name: 'Vai Go', description: 'Budget-friendly', multiplier: 0.8 },
     { id: 'standard', name: 'Vai X', description: 'Standard ride', multiplier: 1.0 },
-    { id: 'premium', name: 'Vai Premium', description: 'Luxury ride', multiplier: 1.4 },
-    { id: 'moto', name: 'Vai Moto', description: 'Motorcycle', multiplier: 0.5 }
+    { id: 'premium', name: 'Vai Premium', description: 'Luxury ride', multiplier: 1.5 },
+    { id: 'van', name: 'Vai Van', description: '7-Seater', multiplier: 1.3 }
   ];
 };
 
@@ -179,4 +196,58 @@ export const getSouthAfricaBounds = () => {
     sw: { lat: -35.0, lng: 16.0 },  // Cape Agulhas
     ne: { lat: -22.0, lng: 33.0 }   // Kruger Park
   };
+};
+
+/**
+ * Get estimated fare range for display
+ * @param {number} distanceKm - Distance in kilometers
+ * @returns {Object} Min and max fare estimates
+ */
+export const getEstimatedFareRange = (distanceKm) => {
+  const minRate = getRatePerKm(distanceKm) * 0.8;
+  const maxRate = getRatePerKm(distanceKm) * 1.2;
+  const minFare = Math.max(MIN_FARE, distanceKm * minRate);
+  const maxFare = Math.max(MIN_FARE, distanceKm * maxRate);
+  return {
+    min: Math.round(minFare * 100) / 100,
+    max: Math.round(maxFare * 100) / 100
+  };
+};
+
+/**
+ * Get fare breakdown display
+ * @param {Object} fareData - Fare data from calculateFareSA
+ * @returns {Object} Formatted breakdown for display
+ */
+export const getFareBreakdownDisplay = (fareData) => {
+  if (!fareData) return null;
+  
+  const { breakdown, total, perKm, minFare, isPeak, serviceType, minRatePerKm, maxRatePerKm, peakSurchargePercent } = fareData;
+  
+  return {
+    total: `R${total.toFixed(2)}`,
+    details: [
+      { label: 'Rate per km', value: `R${perKm.toFixed(2)} (R${minRatePerKm.toFixed(2)}-R${maxRatePerKm.toFixed(2)})` },
+      { label: 'Distance charge', value: `R${breakdown.distanceCharge.toFixed(2)}` },
+      ...(breakdown.serviceMultiplier !== 1 ? [{ label: `Service (${serviceType})`, value: `R${breakdown.serviceCharge.toFixed(2)}` }] : []),
+      ...(isPeak ? [{ label: `Peak surcharge (${peakSurchargePercent}%)`, value: `R${breakdown.peakSurcharge.toFixed(2)}` }] : []),
+      ...(breakdown.minFareApplied ? [{ label: '✓ Minimum fare applied', value: `R${minFare.toFixed(2)}` }] : []),
+    ],
+    minFare: `R${minFare.toFixed(2)}`,
+    isPeak: isPeak,
+    serviceType: serviceType,
+    perKm: perKm,
+    minRatePerKm: minRatePerKm,
+    maxRatePerKm: maxRatePerKm,
+    peakSurchargePercent: peakSurchargePercent
+  };
+};
+
+/**
+ * Format fare for display
+ * @param {number} fare - Fare amount
+ * @returns {string} Formatted fare
+ */
+export const formatFare = (fare) => {
+  return `R${fare.toFixed(2)}`;
 };

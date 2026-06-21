@@ -250,6 +250,10 @@ const RiderDashboard = () => {
   const [isPeak, setIsPeak] = useState(isPeakHour());
   const [isLoading, setIsLoading] = useState(false);
   
+  // ROUTING STATE - with persistence
+  const [routeData, setRouteData] = useState(null);
+  const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+  
   const [driverLocation, setDriverLocation] = useState(null);
   const [driverRotation, setDriverRotation] = useState(0);
   const [driverInfo, setDriverInfo] = useState(null);
@@ -282,6 +286,58 @@ const RiderDashboard = () => {
   // Responsive detection
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
+  // ============ PERSIST ROUTE DATA ============
+  // Save route data to localStorage whenever it changes
+  useEffect(() => {
+    if (routeData) {
+      try {
+        localStorage.setItem('riderRouteData', JSON.stringify(routeData));
+        localStorage.setItem('riderPickup', JSON.stringify(pickup));
+        localStorage.setItem('riderDropoff', JSON.stringify(dropoff));
+        localStorage.setItem('riderPickupAddress', pickupAddress);
+        localStorage.setItem('riderDestination', destination);
+      } catch (error) {
+        console.error('Error saving route data:', error);
+      }
+    }
+  }, [routeData, pickup, dropoff, pickupAddress, destination]);
+
+  // Restore route data from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedRoute = localStorage.getItem('riderRouteData');
+      if (savedRoute) {
+        const parsed = JSON.parse(savedRoute);
+        setRouteData(parsed);
+        console.log('🔄 Restored route data from localStorage');
+      }
+      
+      const savedPickup = localStorage.getItem('riderPickup');
+      if (savedPickup) {
+        const parsed = JSON.parse(savedPickup);
+        setPickup(parsed);
+      }
+      
+      const savedDropoff = localStorage.getItem('riderDropoff');
+      if (savedDropoff) {
+        const parsed = JSON.parse(savedDropoff);
+        setDropoff(parsed);
+      }
+      
+      const savedPickupAddress = localStorage.getItem('riderPickupAddress');
+      if (savedPickupAddress) {
+        setPickupAddress(savedPickupAddress);
+      }
+      
+      const savedDestination = localStorage.getItem('riderDestination');
+      if (savedDestination) {
+        setDestination(savedDestination);
+      }
+    } catch (error) {
+      console.error('Error restoring route data:', error);
+    }
+  }, []);
+
   useEffect(() => {
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -295,6 +351,7 @@ const RiderDashboard = () => {
   const locationAttempted = useRef(false);
   const activeRideFetched = useRef(false);
   const locationRequestInterval = useRef(null);
+  const routeCalculationTimeout = useRef(null);
 
   // Fetch active ride on load
   useEffect(() => {
@@ -322,6 +379,22 @@ const RiderDashboard = () => {
           if (ride.dropoffLocation) {
             setDropoff(ride.dropoffLocation);
             setDestination(ride.dropoffLocation.address || 'Destination');
+          }
+          
+          // Restore route points from ride if available
+          if (ride.routePoints && ride.routePoints.length > 0) {
+            const restoredRoute = {
+              points: ride.routePoints,
+              distance: ride.distance,
+              duration: ride.duration,
+              distanceText: formatDistance(ride.distance),
+              durationText: formatTime(ride.duration || 10),
+              estimatedFare: ride.fare,
+              provider: 'OSM (OpenStreetMap)',
+              isFallback: false
+            };
+            setRouteData(restoredRoute);
+            console.log('🔄 Restored route points from ride');
           }
           
           if (ride.driver) {
@@ -399,17 +472,124 @@ const RiderDashboard = () => {
     });
   }, []);
 
-  // Calculate fare
+  // AUTO-CALCULATE ROUTE when pickup or dropoff changes
   useEffect(() => {
-    const dLat = dropoff.lat - pickup.lat;
-    const dLng = dropoff.lng - pickup.lng;
-    const dist = Math.sqrt(dLat * dLat + dLng * dLng) * 111.32;
-    setDistance(Math.round(dist * 10) / 10);
+    if (routeCalculationTimeout.current) {
+      clearTimeout(routeCalculationTimeout.current);
+    }
+
+    const isDefaultPickup = pickup.lat === -26.2041 && pickup.lng === 28.0473;
+    const isDefaultDropoff = dropoff.lat === -26.2041 && dropoff.lng === 28.0473;
+
+    if (pickup && dropoff && pickup.lat && dropoff.lat && 
+        pickup.lng && dropoff.lng && !currentRide &&
+        !isDefaultPickup && !isDefaultDropoff) {
+      routeCalculationTimeout.current = setTimeout(() => {
+        autoCalculateRoute();
+      }, 800);
+    } else {
+      // Don't clear route data - keep it persisted
+      if (isDefaultPickup || isDefaultDropoff) {
+        // Only clear if both are default
+        if (isDefaultPickup && isDefaultDropoff) {
+          setRouteData(null);
+          localStorage.removeItem('riderRouteData');
+        }
+      }
+    }
+
+    return () => {
+      if (routeCalculationTimeout.current) {
+        clearTimeout(routeCalculationTimeout.current);
+      }
+    };
+  }, [pickup, dropoff]);
+
+  // AUTO-CALCULATE ROUTE function
+  const autoCalculateRoute = async () => {
+    if (currentRide) return;
     
-    if (dist > 0) {
-      const fareData = calculateFareSA(dist, 'johannesburg', isPeak, selectedService);
-      setEstimatedFare(fareData.total);
-      setFareBreakdown(fareData.breakdown);
+    const isDefaultPickup = pickup.lat === -26.2041 && pickup.lng === 28.0473;
+    const isDefaultDropoff = dropoff.lat === -26.2041 && dropoff.lng === 28.0473;
+    
+    if (isDefaultPickup || isDefaultDropoff) {
+      console.log('📍 Using default coordinates, skipping route calculation');
+      return;
+    }
+    
+    const dist = calculateDistance(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
+    if (dist < 0.1) {
+      return;
+    }
+
+    setIsCalculatingRoute(true);
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setIsCalculatingRoute(false);
+        return;
+      }
+
+      console.log('📍 Calculating route from:', pickup, 'to:', dropoff);
+
+      const response = await axios.post(
+        `${API_URL}/api/rides/calculate-route`,
+        {
+          pickup: { lat: pickup.lat, lng: pickup.lng, address: pickupAddress || 'Pickup' },
+          dropoff: { lat: dropoff.lat, lng: dropoff.lng, address: destination || 'Dropoff' }
+        },
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      console.log('📦 Route API response:', response.data);
+
+      if (response.data && response.data.success) {
+        const route = response.data.route;
+        
+        console.log('📍 Route details:', {
+          distance: route.distanceText,
+          duration: route.durationText,
+          points: route.points?.length || 0,
+          isFallback: route.isFallback || false,
+          provider: route.provider
+        });
+        
+        setRouteData(route);
+        setDistance(route.distance);
+        setEstimatedFare(parseFloat(route.estimatedFare));
+        
+        const fareData = calculateFareSA(route.distance, 'johannesburg', isPeak, selectedService);
+        setFareBreakdown(fareData.breakdown);
+        
+        if (route.isFallback) {
+          toast.warning('Using approximate route (OSM unavailable)');
+        }
+      } else {
+        console.error('❌ Route API returned error:', response.data);
+        toast.error('Could not calculate route');
+      }
+    } catch (error) {
+      console.error('❌ Route calculation error:', error);
+      toast.error(error.response?.data?.error || 'Error calculating route');
+    } finally {
+      setIsCalculatingRoute(false);
+    }
+  };
+
+  // Calculate fare (fallback if route not available)
+  useEffect(() => {
+    if (!routeData && pickup && dropoff) {
+      const dLat = dropoff.lat - pickup.lat;
+      const dLng = dropoff.lng - pickup.lng;
+      const dist = Math.sqrt(dLat * dLat + dLng * dLng) * 111.32;
+      setDistance(Math.round(dist * 10) / 10);
+      
+      if (dist > 0) {
+        const fareData = calculateFareSA(dist, 'johannesburg', isPeak, selectedService);
+        setEstimatedFare(fareData.total);
+        setFareBreakdown(fareData.breakdown);
+      }
     }
   }, [pickup, dropoff, selectedService, isPeak]);
 
@@ -476,7 +656,6 @@ const RiderDashboard = () => {
         setDriverRoute([]);
       } else if (status === 'completed') {
         toast.success('✅ Ride completed!');
-        // Show rating modal after completion
         setTimeout(() => {
           setRideToRate(currentRide);
           setShowRatingModal(true);
@@ -492,6 +671,12 @@ const RiderDashboard = () => {
           setDriverSpeed(0);
           setDriverArrivalTime(null);
           setDriverId(null);
+          setRouteData(null);
+          localStorage.removeItem('riderRouteData');
+          localStorage.removeItem('riderPickup');
+          localStorage.removeItem('riderDropoff');
+          localStorage.removeItem('riderPickupAddress');
+          localStorage.removeItem('riderDestination');
         }, 3000);
       } else if (status === 'cancelled') {
         toast.error('Ride cancelled');
@@ -505,6 +690,12 @@ const RiderDashboard = () => {
         setDriverSpeed(0);
         setDriverArrivalTime(null);
         setDriverId(null);
+        setRouteData(null);
+        localStorage.removeItem('riderRouteData');
+        localStorage.removeItem('riderPickup');
+        localStorage.removeItem('riderDropoff');
+        localStorage.removeItem('riderPickupAddress');
+        localStorage.removeItem('riderDestination');
       }
     };
 
@@ -551,6 +742,8 @@ const RiderDashboard = () => {
         setDriverId(null);
         setIsChatOpen(false);
         setUnreadMessages(0);
+        setRouteData(null);
+        localStorage.removeItem('riderRouteData');
       }
     };
 
@@ -596,19 +789,33 @@ const RiderDashboard = () => {
   };
 
   const requestRide = async () => {
+    if (!routeData) {
+      toast.error('Please wait for route to calculate');
+      return;
+    }
+
     try {
       setIsRequesting(true);
       setIsLoading(true);
 
       const response = await axios.post(`${API_URL}/api/rides/request`, {
-        pickup: { lat: pickup.lat, lng: pickup.lng, address: pickupAddress || 'Current Location' },
-        dropoff: { lat: dropoff.lat, lng: dropoff.lng, address: destination || 'Destination' },
-        distance: distance || 5,
-        duration: Math.round(distance * 2) || 10,
+        pickup: { 
+          lat: pickup.lat, 
+          lng: pickup.lng, 
+          address: pickupAddress || 'Current Location' 
+        },
+        dropoff: { 
+          lat: dropoff.lat, 
+          lng: dropoff.lng, 
+          address: destination || 'Destination' 
+        },
+        distance: routeData.distance || distance,
+        duration: routeData.duration || Math.round(distance * 2) || 10,
         fare: estimatedFare,
         serviceType: selectedService,
         isPeak: isPeak,
-        paymentMethod: selectedPayment
+        paymentMethod: selectedPayment,
+        routePoints: routeData.points || [] // Store route points in ride
       });
 
       const ride = response.data.ride;
@@ -629,6 +836,7 @@ const RiderDashboard = () => {
         pickup: ride.pickupLocation,
         dropoff: ride.dropoffLocation,
         fare: ride.fare,
+        routePoints: routeData.points || []
       });
       toast.success(`Ride requested! R${ride.fare.toFixed(2)}`);
     } catch (error) {
@@ -665,6 +873,8 @@ const RiderDashboard = () => {
       setDriverId(null);
       setIsChatOpen(false);
       setUnreadMessages(0);
+      setRouteData(null);
+      localStorage.removeItem('riderRouteData');
       if (locationRequestInterval.current) {
         clearInterval(locationRequestInterval.current);
       }
@@ -707,6 +917,12 @@ const RiderDashboard = () => {
   };
 
   const handleLogout = () => {
+    // Clear persisted route data on logout
+    localStorage.removeItem('riderRouteData');
+    localStorage.removeItem('riderPickup');
+    localStorage.removeItem('riderDropoff');
+    localStorage.removeItem('riderPickupAddress');
+    localStorage.removeItem('riderDestination');
     logout();
     navigate('/login');
   };
@@ -753,9 +969,10 @@ const RiderDashboard = () => {
   // Check if ride is active
   const isRideActive = currentRide && rideStatus !== 'completed' && rideStatus !== 'cancelled';
 
+  // Render the map and UI - same as before but with routeData persistence
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
-      {/* Header - Smooth Flat Twitter-style */}
+      {/* Header */}
       <header className="w-full bg-white border-b border-gray-100 px-4 py-3 flex justify-between items-center shadow-none z-30 flex-shrink-0">
         <div className="flex items-center space-x-3">
           <div className="flex items-center">
@@ -782,7 +999,6 @@ const RiderDashboard = () => {
           )}
         </div>
         <div className="flex items-center space-x-4">
-          {/* History - Desktop only */}
           {!isMobile && (
             <button 
               onClick={() => navigate('/history')} 
@@ -797,14 +1013,12 @@ const RiderDashboard = () => {
           >
             <FaCrosshairs className="h-5 w-5" />
           </button>
-          {/* Debug */}
           <button 
             onClick={() => setShowDebug(!showDebug)} 
             className="text-gray-400 hover:text-black transition-colors"
           >
             <FaBug className="h-5 w-5" />
           </button>
-          {/* Logout */}
           <button 
             onClick={handleLogout} 
             className="text-gray-400 hover:text-red-500 transition-colors"
@@ -842,7 +1056,6 @@ const RiderDashboard = () => {
           
           <ChangeMapView targetLocation={[pickup.lat, pickup.lng]} zoom={14} />
           
-          {/* LocationPicker - Disabled during active ride */}
           <LocationPicker 
             setPickup={setPickup} 
             setPickupAddress={setPickupAddress} 
@@ -864,6 +1077,17 @@ const RiderDashboard = () => {
               <p className="text-xs">{destination || 'Destination'}</p>
             </Popup>
           </Marker>
+          
+          {/* Route Line - BLACK color */}
+          {routeData && routeData.points && routeData.points.length > 1 && (
+            <Polyline 
+              positions={routeData.points.map(p => [p.lat, p.lng])} 
+              color="#000000" 
+              weight={4} 
+              opacity={0.8}
+              smoothFactor={1}
+            />
+          )}
           
           {/* Driver Car Marker */}
           {driverLocation && currentRide && rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
@@ -901,27 +1125,27 @@ const RiderDashboard = () => {
             </Marker>
           )}
           
-          {/* Driver route line (driver to pickup) */}
+          {/* Driver route line (driver to pickup) - BLACK dashed */}
           {driverRoute.length > 0 && currentRide && rideStatus === 'accepted' && (
             <Polyline 
               positions={driverRoute.map(p => [p.lat, p.lng])} 
-              color="#2563eb" 
+              color="#000000" 
               weight={3} 
               opacity={0.7} 
               dashArray="8, 6"
             />
           )}
           
-          {/* Pickup to Dropoff Route Line - Always visible */}
+          {/* Pickup to Dropoff Route Line - BLACK dashed */}
           {currentRide && currentRide.pickupLocation && currentRide.dropoffLocation && rideStatus !== 'cancelled' && (
             <Polyline 
               positions={[
                 [currentRide.pickupLocation.lat, currentRide.pickupLocation.lng],
                 [currentRide.dropoffLocation.lat, currentRide.dropoffLocation.lng]
               ]} 
-              color="#eab308"
+              color="#000000"
               weight={3} 
-              opacity={0.5}
+              opacity={0.4}
               dashArray="10, 8"
             />
           )}
@@ -941,6 +1165,7 @@ const RiderDashboard = () => {
             <p>Socket: {socket ? '✅ Connected' : '❌'}</p>
             <p>Ride ID: {currentRide?._id?.slice(-6) || 'none'}</p>
             <p>Pickup: {pickup ? `${pickup.lat.toFixed(4)}, ${pickup.lng.toFixed(4)}` : '❌'}</p>
+            <p>Route Points Saved: {routeData?.points?.length || 0}</p>
             <p className="text-yellow-300 text-[10px] mt-1">Last update: {debugInfo.timestamp || 'never'}</p>
             <button 
               onClick={requestDriverLocation}
@@ -999,7 +1224,7 @@ const RiderDashboard = () => {
               </button>
               <button
                 onClick={requestRide}
-                disabled={isRequesting || !destination || distance === 0 || isGettingLocation}
+                disabled={isRequesting || !destination || distance === 0 || isGettingLocation || !routeData}
                 className="p-2 bg-black text-white rounded-lg hover:bg-gray-800 transition disabled:opacity-50 flex-shrink-0"
               >
                 {isRequesting ? (
@@ -1009,10 +1234,10 @@ const RiderDashboard = () => {
                 )}
               </button>
             </div>
-            {fareBreakdown && (
+            {fareBreakdown && routeData && (
               <div className="flex justify-between items-center mt-2 px-1">
                 <div>
-                  <p className="text-xs text-gray-500">{distance.toFixed(1)} km • ~{Math.round(distance * 2)} min</p>
+                  <p className="text-xs text-gray-500">{routeData.distanceText} • {routeData.durationText}</p>
                   <p className="text-xs text-gray-500 capitalize">{selectedService}</p>
                   <p className="text-xs text-gray-500">Payment: {selectedPayment.toUpperCase()}</p>
                 </div>
@@ -1023,6 +1248,9 @@ const RiderDashboard = () => {
             )}
             {!destination && (
               <p className="text-xs text-red-500 text-center mt-1">Please enter a destination</p>
+            )}
+            {isCalculatingRoute && (
+              <p className="text-xs text-blue-500 text-center mt-1">Calculating route...</p>
             )}
           </div>
         )}
@@ -1043,7 +1271,6 @@ const RiderDashboard = () => {
               <span className="text-lg font-bold text-green-600">R{currentRide.fare?.toFixed(2)}</span>
             </div>
 
-            {/* Trip Reference */}
             {currentRide?.tripReference && (
               <div className="flex justify-between items-center bg-gray-50 px-3 py-1.5 rounded-lg mb-2">
                 <span className="text-xs text-gray-500">Trip Reference</span>
@@ -1167,7 +1394,6 @@ const RiderDashboard = () => {
                   </button>
                 </>
               )}
-              {/* No cancel button for in-progress - only chat */}
               {rideStatus === 'in-progress' && (
                 <button
                   onClick={() => setIsChatOpen(true)}
@@ -1268,14 +1494,13 @@ const RiderDashboard = () => {
                             {service.id === 'economy' && '💰 Budget'}
                             {service.id === 'standard' && '⭐ Standard'}
                             {service.id === 'premium' && '💎 Luxury'}
-                            {service.id === 'moto' && '🏍️ Fast'}
+                            {service.id === 'van' && '🚐 7-Seater'}
                           </div>
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* Payment Method Selection */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       <FaWallet className="inline mr-1" /> Payment Method
@@ -1304,43 +1529,53 @@ const RiderDashboard = () => {
                   {isPeak && (
                     <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-center">
                       <FaClock className="text-red-500 mr-2" />
-                      <span className="text-sm text-red-700">⚡ Peak pricing active</span>
+                      <span className="text-sm text-red-700">⚡ Peak pricing active (20%)</span>
                     </div>
                   )}
 
-                  {distance > 0 && fareBreakdown && (
+                  {distance > 0 && routeData && (
                     <div className="p-4 bg-gray-50 rounded-lg">
-                      <div className="flex justify-between items-center mb-2">
+                      <div className="flex justify-between items-center">
                         <div>
-                          <h3 className="font-medium text-gray-700">Estimated Fare</h3>
-                          <p className="text-xs text-gray-500">
-                            {distance.toFixed(1)} km • ~{Math.round(distance * 2)} min
+                          <h3 className="font-medium text-gray-700">Trip Details</h3>
+                          <p className="text-sm text-gray-500">
+                            {routeData.distanceText} • {routeData.durationText}
                           </p>
-                          <p className="text-xs text-gray-500">Payment: {selectedPayment.toUpperCase()}</p>
+                          <p className="text-xs text-gray-400">Provider: {routeData.provider}</p>
+                          {routeData.isFallback && (
+                            <p className="text-xs text-yellow-600">⚠️ Approximate route</p>
+                          )}
                         </div>
                         <p className="text-2xl font-bold text-green-600">R{estimatedFare.toFixed(2)}</p>
                       </div>
+                      
+                      <button
+                        onClick={requestRide}
+                        disabled={isRequesting || !destination || distance === 0 || isGettingLocation || !routeData}
+                        className="w-full mt-3 py-3 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50"
+                      >
+                        {isGettingLocation ? (
+                          <span className="flex items-center justify-center">
+                            <FaSpinner className="animate-spin mr-2" /> Getting location...
+                          </span>
+                        ) : isRequesting ? (
+                          <span className="flex items-center justify-center">
+                            <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></span>
+                            Requesting...
+                          </span>
+                        ) : (
+                          `🚗 Request Ride (R${estimatedFare.toFixed(2)})`
+                        )}
+                      </button>
                     </div>
                   )}
 
-                  <button
-                    onClick={requestRide}
-                    disabled={isRequesting || !destination || distance === 0 || isGettingLocation}
-                    className="w-full py-3 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50"
-                  >
-                    {isGettingLocation ? (
-                      <span className="flex items-center justify-center">
-                        <FaSpinner className="animate-spin mr-2" /> Getting location...
-                      </span>
-                    ) : isRequesting ? (
-                      <span className="flex items-center justify-center">
-                        <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></span>
-                        Requesting...
-                      </span>
-                    ) : (
-                      `🚗 Request Ride (R${estimatedFare.toFixed(2)})`
-                    )}
-                  </button>
+                  {isCalculatingRoute && (
+                    <div className="text-center py-4">
+                      <FaSpinner className="animate-spin mx-auto h-8 w-8 text-blue-500" />
+                      <p className="text-sm text-gray-500 mt-2">Calculating route...</p>
+                    </div>
+                  )}
 
                   <div className="border-t pt-4">
                     <p className="text-sm text-gray-500 flex items-center">
@@ -1371,7 +1606,6 @@ const RiderDashboard = () => {
                         <span className="font-medium capitalize">{currentRide.paymentMethod || 'Cash'}</span>
                       </div>
                       
-                      {/* Trip Reference */}
                       {currentRide?.tripReference && (
                         <div className="flex justify-between">
                           <span className="text-gray-600">Trip Reference</span>
@@ -1458,7 +1692,6 @@ const RiderDashboard = () => {
                         </div>
                       )}
                       
-                      {/* Chat Button - Desktop */}
                       {rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
                         <div className="pt-2 border-t mt-2">
                           <button
@@ -1475,7 +1708,6 @@ const RiderDashboard = () => {
                         </div>
                       )}
                       
-                      {/* Cancel Button - Only show for requested, accepted, or arrived */}
                       {(rideStatus === 'requested' || rideStatus === 'accepted' || rideStatus === 'arrived') && (
                         <button
                           onClick={cancelRide}
@@ -1486,7 +1718,6 @@ const RiderDashboard = () => {
                         </button>
                       )}
                       
-                      {/* No cancel button for in-progress */}
                       {rideStatus === 'in-progress' && (
                         <p className="text-center text-xs text-gray-500 mt-2">
                           Ride in progress - Cannot cancel
@@ -1508,6 +1739,8 @@ const RiderDashboard = () => {
                             setDriverId(null);
                             setIsChatOpen(false);
                             setUnreadMessages(0);
+                            setRouteData(null);
+                            localStorage.removeItem('riderRouteData');
                             if (locationRequestInterval.current) {
                               clearInterval(locationRequestInterval.current);
                             }
@@ -1593,7 +1826,7 @@ const RiderDashboard = () => {
         />
       )}
 
-      {/* Bottom Navigation - Mobile Twitter-style */}
+      {/* Bottom Navigation - Mobile */}
       {isMobile && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-bottom">
           <div className="flex items-center justify-around h-14 max-w-screen-lg mx-auto px-4">
@@ -1606,7 +1839,7 @@ const RiderDashboard = () => {
             </button>
             <button
               onClick={requestRide}
-              disabled={isRequesting || !destination || distance === 0}
+              disabled={isRequesting || !destination || distance === 0 || !routeData}
               className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors disabled:opacity-50"
             >
               <FaCar className="h-6 w-6 text-black" />

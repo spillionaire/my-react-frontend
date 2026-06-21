@@ -187,6 +187,50 @@ const DriverDashboard = () => {
   const locationAttempted = useRef(false);
   const activeRideFetched = useRef(false);
 
+  // ============ PERSIST ROUTE DATA ============
+  // Save route data to localStorage whenever it changes
+  useEffect(() => {
+    if (driverRoute && driverRoute.length > 0) {
+      try {
+        localStorage.setItem('driverRoutePoints', JSON.stringify(driverRoute));
+        localStorage.setItem('driverRideId', currentRide?._id || '');
+        localStorage.setItem('driverRideStatus', rideStatus || '');
+        console.log('💾 Driver route saved to localStorage:', driverRoute.length, 'points');
+      } catch (error) {
+        console.error('Error saving driver route:', error);
+      }
+    }
+  }, [driverRoute, currentRide, rideStatus]);
+
+  // Restore route data from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedRoute = localStorage.getItem('driverRoutePoints');
+      const savedRideId = localStorage.getItem('driverRideId');
+      const savedStatus = localStorage.getItem('driverRideStatus');
+      
+      if (savedRoute && savedRideId) {
+        const parsed = JSON.parse(savedRoute);
+        if (parsed && parsed.length > 0) {
+          setDriverRoute(parsed);
+          console.log('🔄 Restored driver route from localStorage:', parsed.length, 'points');
+          
+          // Check if the ride is still active
+          if (savedStatus && savedStatus !== 'completed' && savedStatus !== 'cancelled') {
+            // Keep the route
+          } else {
+            // Clear if ride is completed or cancelled
+            localStorage.removeItem('driverRoutePoints');
+            localStorage.removeItem('driverRideId');
+            localStorage.removeItem('driverRideStatus');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error restoring driver route:', error);
+    }
+  }, []);
+
   useEffect(() => {
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -255,9 +299,26 @@ const DriverDashboard = () => {
             setRiderInfo(ride.rider);
           }
           
+          // Restore route points from ride if available
+          if (ride.routePoints && ride.routePoints.length > 0) {
+            setDriverRoute(ride.routePoints);
+            console.log('🔄 Restored route points from ride:', ride.routePoints.length);
+          }
+          
           if (ride.status === 'in-progress' && ride.startLocation) {
             setRideStartLocation(ride.startLocation);
             setRideStartTime(ride.startTime);
+            // Draw route to dropoff when ride is in progress
+            if (!ride.routePoints || ride.routePoints.length === 0) {
+              drawRouteToDropoff(ride);
+            }
+          }
+          
+          // If ride is accepted, draw route to pickup
+          if (ride.status === 'accepted' || ride.status === 'arrived') {
+            if (!ride.routePoints || ride.routePoints.length === 0) {
+              drawRouteToPickup(ride);
+            }
           }
           
           toast.success('🔄 Restored your active ride');
@@ -360,6 +421,11 @@ const DriverDashboard = () => {
             location.lng
           );
           setRideDistanceTraveled(dist);
+          
+          // Update driver location on route if ride is in progress
+          if (currentRide && currentRide.dropoffLocation) {
+            updateRouteToDropoff(location);
+          }
         }
 
         if (currentRide && rideStatus === 'accepted' && !arrivalChecked) {
@@ -382,13 +448,8 @@ const DriverDashboard = () => {
             setShowManualArrival(true);
           }
           
-          try {
-            const route = getRoutePointsWithCurve(location, currentRide.pickupLocation, 30);
-            setDriverRoute(route);
-          } catch (error) {
-            const route = getRoutePoints(location, currentRide.pickupLocation, 20);
-            setDriverRoute(route);
-          }
+          // Update route to pickup as driver moves
+          updateRouteToPickup(location);
         }
 
         if (isAvailable || currentRide) {
@@ -421,6 +482,172 @@ const DriverDashboard = () => {
     );
 
     watchIdRef.current = watchId;
+  };
+
+  // ============ FETCH ROUTE FROM API ============
+  const fetchRouteFromAPI = async (startLat, startLng, endLat, endLng) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        `${API_URL}/api/rides/calculate-route`,
+        {
+          pickup: { lat: startLat, lng: startLng, address: 'Driver Location' },
+          dropoff: { lat: endLat, lng: endLng, address: 'Destination' }
+        },
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (response.data && response.data.success) {
+        return response.data.route.points;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching route from API:', error);
+      return null;
+    }
+  };
+
+  // ============ DRAW ROUTE TO PICKUP ============
+  const drawRouteToPickup = async (ride) => {
+    if (!ride || !ride.pickupLocation) return;
+    
+    try {
+      // Try to get actual road route from API
+      const routePoints = await fetchRouteFromAPI(
+        currentLocation.lat,
+        currentLocation.lng,
+        ride.pickupLocation.lat,
+        ride.pickupLocation.lng
+      );
+      
+      if (routePoints && routePoints.length > 1) {
+        setDriverRoute(routePoints);
+        console.log('📍 Route to pickup from API:', routePoints.length, 'points');
+        // Save to localStorage
+        localStorage.setItem('driverRoutePoints', JSON.stringify(routePoints));
+      } else {
+        // Fallback to curved line if API fails
+        const route = getRoutePointsWithCurve(
+          currentLocation, 
+          ride.pickupLocation, 
+          30
+        );
+        if (route && route.length > 0) {
+          setDriverRoute(route);
+          console.log('📍 Route to pickup (fallback):', route.length, 'points');
+        }
+      }
+    } catch (error) {
+      console.error('Error drawing route to pickup:', error);
+      const route = getRoutePointsWithCurve(
+        currentLocation, 
+        ride.pickupLocation, 
+        30
+      );
+      setDriverRoute(route);
+    }
+  };
+
+  // ============ UPDATE ROUTE TO PICKUP ============
+  const updateRouteToPickup = async (location) => {
+    if (!currentRide || !currentRide.pickupLocation) return;
+    
+    if (rideStatus === 'accepted' && !isAtPickup) {
+      try {
+        // Only update every 10 seconds to avoid too many API calls
+        const lastUpdate = localStorage.getItem('lastDriverRouteUpdate');
+        const now = Date.now();
+        if (lastUpdate && now - parseInt(lastUpdate) < 10000) {
+          return;
+        }
+        localStorage.setItem('lastDriverRouteUpdate', now.toString());
+        
+        const routePoints = await fetchRouteFromAPI(
+          location.lat,
+          location.lng,
+          currentRide.pickupLocation.lat,
+          currentRide.pickupLocation.lng
+        );
+        
+        if (routePoints && routePoints.length > 1) {
+          setDriverRoute(routePoints);
+          localStorage.setItem('driverRoutePoints', JSON.stringify(routePoints));
+        }
+      } catch (error) {
+        // Silent fail, keep existing route
+      }
+    }
+  };
+
+  // ============ DRAW ROUTE TO DROPOFF ============
+  const drawRouteToDropoff = async (ride) => {
+    if (!ride || !ride.dropoffLocation) return;
+    
+    try {
+      // Try to get actual road route from API
+      const routePoints = await fetchRouteFromAPI(
+        currentLocation.lat,
+        currentLocation.lng,
+        ride.dropoffLocation.lat,
+        ride.dropoffLocation.lng
+      );
+      
+      if (routePoints && routePoints.length > 1) {
+        setDriverRoute(routePoints);
+        console.log('📍 Route to dropoff from API:', routePoints.length, 'points');
+        localStorage.setItem('driverRoutePoints', JSON.stringify(routePoints));
+      } else {
+        // Fallback to curved line if API fails
+        const route = getRoutePointsWithCurve(
+          currentLocation, 
+          ride.dropoffLocation, 
+          30
+        );
+        if (route && route.length > 0) {
+          setDriverRoute(route);
+          console.log('📍 Route to dropoff (fallback):', route.length, 'points');
+        }
+      }
+    } catch (error) {
+      console.error('Error drawing route to dropoff:', error);
+      const route = getRoutePointsWithCurve(
+        currentLocation, 
+        ride.dropoffLocation, 
+        30
+      );
+      setDriverRoute(route);
+    }
+  };
+
+  // ============ UPDATE ROUTE TO DROPOFF ============
+  const updateRouteToDropoff = async (location) => {
+    if (!currentRide || !currentRide.dropoffLocation) return;
+    
+    if (rideStatus === 'in-progress') {
+      try {
+        // Only update every 10 seconds to avoid too many API calls
+        const lastUpdate = localStorage.getItem('lastDriverRouteUpdate');
+        const now = Date.now();
+        if (lastUpdate && now - parseInt(lastUpdate) < 10000) {
+          return;
+        }
+        localStorage.setItem('lastDriverRouteUpdate', now.toString());
+        
+        const routePoints = await fetchRouteFromAPI(
+          location.lat,
+          location.lng,
+          currentRide.dropoffLocation.lat,
+          currentRide.dropoffLocation.lng
+        );
+        
+        if (routePoints && routePoints.length > 1) {
+          setDriverRoute(routePoints);
+          localStorage.setItem('driverRoutePoints', JSON.stringify(routePoints));
+        }
+      } catch (error) {
+        // Silent fail, keep existing route
+      }
+    }
   };
 
   // ============ AUTO-ARRIVAL CHECK ============
@@ -504,6 +731,10 @@ const DriverDashboard = () => {
       setIsAtPickup(true);
       setShowManualArrival(false);
       setRideStatus('arrived');
+      
+      // Clear route to pickup once arrived
+      setDriverRoute([]);
+      localStorage.removeItem('driverRoutePoints');
       
       if (socket) {
         socket.emit('update-ride-status', {
@@ -617,6 +848,12 @@ const DriverDashboard = () => {
       setEarlyCompletionReason('');
       setEarlyCompletionNote('');
 
+      // Clear route on completion
+      setDriverRoute([]);
+      localStorage.removeItem('driverRoutePoints');
+      localStorage.removeItem('driverRideId');
+      localStorage.removeItem('driverRideStatus');
+
       // Show rating modal after completion
       setTimeout(() => {
         setRideToRate(currentRide);
@@ -713,6 +950,11 @@ const DriverDashboard = () => {
       setRideStartTime(null);
       setRideDistanceTraveled(0);
       
+      // Clear route on cancellation
+      localStorage.removeItem('driverRoutePoints');
+      localStorage.removeItem('driverRideId');
+      localStorage.removeItem('driverRideStatus');
+      
       setIsAvailable(true);
       if (socket) {
         socket.emit('driver-online', {
@@ -784,7 +1026,9 @@ const DriverDashboard = () => {
         setRiderInfo(response.data.rider);
       }
       
-      setDriverRoute(getRoutePointsWithCurve(currentLocation, response.data.pickupLocation, 30));
+      // DRAW ROUTE TO PICKUP when ride is accepted
+      await drawRouteToPickup(response.data);
+      
       toast.success('✅ Ride accepted! Navigating to pickup');
       
       const dist = calculateDistance(
@@ -817,12 +1061,11 @@ const DriverDashboard = () => {
     }
   };
 
-  // ============ START RIDE ============
+  // ============ START RIDE - WITH ROUTE TO DROPOFF ============
   const startRide = async () => {
     try {
       setIsLoading(true);
       console.log('🚗 Starting ride...');
-      console.log('📡 Ride ID:', currentRide?._id);
       
       const token = localStorage.getItem('token');
       
@@ -867,6 +1110,9 @@ const DriverDashboard = () => {
       if (started) {
         setRideStatus('in-progress');
         
+        // DRAW ROUTE TO DROPOFF when ride starts
+        await drawRouteToDropoff(currentRide);
+        
         if (socket) {
           socket.emit('update-ride-status', {
             rideId: currentRide._id,
@@ -876,7 +1122,6 @@ const DriverDashboard = () => {
           });
         }
         
-        setDriverRoute(getRoutePointsWithCurve(currentLocation, currentRide.dropoffLocation, 30));
         toast.success('🚗 Ride started!');
       }
     } catch (error) {
@@ -889,6 +1134,12 @@ const DriverDashboard = () => {
 
   // ============ HANDLE LOGOUT ============
   const handleLogout = () => {
+    // Clear route data on logout
+    localStorage.removeItem('driverRoutePoints');
+    localStorage.removeItem('driverRideId');
+    localStorage.removeItem('driverRideStatus');
+    localStorage.removeItem('lastDriverRouteUpdate');
+    
     if (isAvailable) {
       socket?.emit('driver-offline', { 
         driverId: user?._id 
@@ -982,7 +1233,11 @@ const DriverDashboard = () => {
         setRideStartTime(null);
         setRideDistanceTraveled(0);
         
-        // Show rating modal after completion
+        // Clear route data
+        localStorage.removeItem('driverRoutePoints');
+        localStorage.removeItem('driverRideId');
+        localStorage.removeItem('driverRideStatus');
+        
         setTimeout(() => {
           setRideToRate(currentRide);
           setShowRatingModal(true);
@@ -1019,6 +1274,10 @@ const DriverDashboard = () => {
         setRideStartLocation(null);
         setRideStartTime(null);
         setRideDistanceTraveled(0);
+        
+        localStorage.removeItem('driverRoutePoints');
+        localStorage.removeItem('driverRideId');
+        localStorage.removeItem('driverRideStatus');
       }
     });
 
@@ -1030,7 +1289,7 @@ const DriverDashboard = () => {
         setShowManualArrival(false);
         setArrivalAttempts(0);
         if (currentRide) {
-          setDriverRoute(getRoutePointsWithCurve(currentLocation, currentRide.pickupLocation, 30));
+          drawRouteToPickup(currentRide);
         }
       }
     });
@@ -1055,6 +1314,11 @@ const DriverDashboard = () => {
         setRideStartLocation(null);
         setRideStartTime(null);
         setRideDistanceTraveled(0);
+        
+        localStorage.removeItem('driverRoutePoints');
+        localStorage.removeItem('driverRideId');
+        localStorage.removeItem('driverRideStatus');
+        
         setIsAvailable(true);
         if (socket) {
           socket.emit('driver-online', {
@@ -1086,6 +1350,11 @@ const DriverDashboard = () => {
         setRideStartLocation(null);
         setRideStartTime(null);
         setRideDistanceTraveled(0);
+        
+        localStorage.removeItem('driverRoutePoints');
+        localStorage.removeItem('driverRideId');
+        localStorage.removeItem('driverRideStatus');
+        
         setIsAvailable(true);
         if (socket) {
           socket.emit('driver-online', {
@@ -1172,7 +1441,7 @@ const DriverDashboard = () => {
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
-      {/* Header - Smooth Flat Twitter-style */}
+      {/* Header */}
       <header className="w-full bg-white border-b border-gray-100 px-4 py-3 flex justify-between items-center shadow-none z-30 flex-shrink-0">
         <div className="flex items-center space-x-3">
           <div className="flex items-center">
@@ -1204,7 +1473,6 @@ const DriverDashboard = () => {
           )}
         </div>
         <div className="flex items-center space-x-4">
-          {/* History - Desktop only */}
           {!isMobile && (
             <button 
               onClick={() => navigate('/history')} 
@@ -1213,14 +1481,12 @@ const DriverDashboard = () => {
               <FaHistory className="h-5 w-5" />
             </button>
           )}
-          {/* Debug */}
           <button 
             onClick={() => setShowDebug(!showDebug)} 
             className="text-gray-400 hover:text-black transition-colors"
           >
             <FaBug className="h-5 w-5" />
           </button>
-          {/* Logout */}
           <button 
             onClick={handleLogout} 
             className="text-gray-400 hover:text-red-500 transition-colors"
@@ -1317,22 +1583,23 @@ const DriverDashboard = () => {
             </>
           )}
           
+          {/* Driver Route Line - BLACK color */}
           {driverRoute.length > 0 && (
             <Polyline
               positions={driverRoute.map(p => [p.lat, p.lng])}
-              color={isAtPickup ? '#22c55e' : '#2563eb'}
+              color="#000000"
               weight={4}
-              opacity={0.7}
-              dashArray={isAtPickup ? undefined : '10, 8'}
+              opacity={0.8}
+              smoothFactor={1}
             />
           )}
           
           {routePoints.length > 1 && (
             <Polyline
               positions={routePoints.map(p => [p.lat, p.lng])}
-              color="#3b82f6"
-              weight={3}
-              opacity={0.4}
+              color="#666666"
+              weight={2}
+              opacity={0.3}
             />
           )}
         </MapContainer>
@@ -1366,6 +1633,7 @@ const DriverDashboard = () => {
             <p>Socket: {socket?.isConnected ? '✅ Connected' : '❌'}</p>
             <p>Ride ID: {currentRide?._id?.slice(-6) || 'none'}</p>
             <p>Distance Traveled: {formatDistance(rideDistanceTraveled)}</p>
+            <p>Route Points: {driverRoute.length}</p>
             <p className="text-yellow-300 text-[10px] mt-1">Pickup: {currentRide?.pickupLocation?.lat?.toFixed(4)}, {currentRide?.pickupLocation?.lng?.toFixed(4)}</p>
             
             <button 
@@ -1540,7 +1808,6 @@ const DriverDashboard = () => {
                 )}
                 
                 <div className="flex flex-wrap gap-2 mt-2">
-                  {/* Heading to pickup - Show "I'm Here" button */}
                   {rideStatus === 'accepted' && !isAtPickup && (
                     <>
                       <button
@@ -1560,7 +1827,6 @@ const DriverDashboard = () => {
                     </>
                   )}
                   
-                  {/* Arrived - Show Start Ride Button */}
                   {(rideStatus === 'accepted' && isAtPickup) || rideStatus === 'arrived' ? (
                     <>
                       <button
@@ -1580,7 +1846,6 @@ const DriverDashboard = () => {
                     </>
                   ) : null}
                   
-                  {/* In Progress - Show Complete Ride with Reason option */}
                   {rideStatus === 'in-progress' && (
                     <>
                       <button
@@ -1593,7 +1858,6 @@ const DriverDashboard = () => {
                     </>
                   )}
                   
-                  {/* Completed - Go Online */}
                   {rideStatus === 'completed' && (
                     <button
                       onClick={() => {
@@ -1613,6 +1877,9 @@ const DriverDashboard = () => {
                         setRideStartLocation(null);
                         setRideStartTime(null);
                         setRideDistanceTraveled(0);
+                        localStorage.removeItem('driverRoutePoints');
+                        localStorage.removeItem('driverRideId');
+                        localStorage.removeItem('driverRideStatus');
                         setIsAvailable(true);
                         if (socket) {
                           socket.emit('driver-online', {
@@ -1629,7 +1896,6 @@ const DriverDashboard = () => {
                   )}
                 </div>
 
-                {/* Chat button - mobile */}
                 {rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
                   <button
                     onClick={() => setIsChatOpen(true)}
@@ -1646,7 +1912,7 @@ const DriverDashboard = () => {
               </div>
             )}
 
-            {/* Mobile Bottom Navigation - Twitter-style */}
+            {/* Mobile Bottom Navigation */}
             <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-bottom">
               <div className="flex items-center justify-around h-14 max-w-screen-lg mx-auto px-4">
                 <button
@@ -1831,7 +2097,6 @@ const DriverDashboard = () => {
                       <span className="font-medium">{currentRide.distance?.toFixed(1) || '0'} km</span>
                     </div>
                     
-                    {/* Trip Reference */}
                     {currentRide?.tripReference && (
                       <div className="flex justify-between">
                         <span className="text-gray-600">Trip Reference</span>
@@ -1841,7 +2106,6 @@ const DriverDashboard = () => {
                       </div>
                     )}
                     
-                    {/* Rider Information */}
                     {riderInfo && (
                       <div className="pt-2 border-t">
                         <p className="text-xs font-medium text-gray-700 mb-2 flex items-center">
@@ -1860,7 +2124,6 @@ const DriverDashboard = () => {
                       </div>
                     )}
                     
-                    {/* Distance and ETA Display */}
                     {distanceToPickup !== null && rideStatus === 'accepted' && !isAtPickup && (
                       <>
                         <div className="flex justify-between">
@@ -1891,7 +2154,6 @@ const DriverDashboard = () => {
                       </>
                     )}
                     
-                    {/* In Progress - Show distance traveled */}
                     {rideStatus === 'in-progress' && (
                       <>
                         <div className="flex justify-between">
@@ -1919,9 +2181,6 @@ const DriverDashboard = () => {
                       </div>
                     )}
                     
-                    {/* Action Buttons - Desktop */}
-                    
-                    {/* Manual Arrival Button */}
                     {rideStatus === 'accepted' && !isAtPickup && (
                       <div className="pt-2 border-t mt-2">
                         <button
@@ -1934,7 +2193,6 @@ const DriverDashboard = () => {
                       </div>
                     )}
                     
-                    {/* Start Ride Button */}
                     {(rideStatus === 'accepted' && isAtPickup) || rideStatus === 'arrived' ? (
                       <div className="pt-2 border-t mt-2">
                         <button
@@ -1947,7 +2205,6 @@ const DriverDashboard = () => {
                       </div>
                     ) : null}
                     
-                    {/* Complete Ride Button (with reason) - Only in progress */}
                     {rideStatus === 'in-progress' && (
                       <div className="pt-2 border-t mt-2">
                         <button
@@ -1960,7 +2217,6 @@ const DriverDashboard = () => {
                       </div>
                     )}
                     
-                    {/* Chat Button */}
                     {rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
                       <div className="pt-2 border-t mt-2">
                         <button
@@ -1977,7 +2233,6 @@ const DriverDashboard = () => {
                       </div>
                     )}
                     
-                    {/* Cancel Ride Button - Only for accepted/arrived */}
                     {(rideStatus === 'accepted' || rideStatus === 'arrived') && (
                       <div className="pt-2 border-t mt-2">
                         <button
@@ -1990,7 +2245,6 @@ const DriverDashboard = () => {
                       </div>
                     )}
                     
-                    {/* No cancel for in-progress - show message */}
                     {rideStatus === 'in-progress' && (
                       <div className="pt-2 border-t mt-2">
                         <p className="text-center text-xs text-gray-500">
