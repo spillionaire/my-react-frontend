@@ -47,7 +47,7 @@ const RatingModal = ({ rideId, userRole, onClose, onSubmitted }) => {
       >
         <FaStar
           className={`${
-            (hover || rating) >= star ? 'text-yellow-500' : 'text-gray-300'
+            (hover || rating) >= star ? 'text-yellow-400' : 'text-gray-600'
           }`}
         />
       </button>
@@ -55,18 +55,18 @@ const RatingModal = ({ rideId, userRole, onClose, onSubmitted }) => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+      <div className="bg-[#0E1A2A] rounded-2xl p-6 max-w-sm w-full border border-[#1A2A4A]">
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-bold">
+          <h3 className="text-xl font-bold text-white">
             Rate Your {userRole === 'rider' ? 'Driver' : 'Rider'}
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button onClick={onClose} className="text-gray-400 hover:text-white transition">
             <FaTimes className="h-5 w-5" />
           </button>
         </div>
 
-        <p className="text-gray-500 text-sm mb-4">
+        <p className="text-gray-400 text-sm mb-4">
           How was your experience?
         </p>
 
@@ -78,7 +78,7 @@ const RatingModal = ({ rideId, userRole, onClose, onSubmitted }) => {
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           placeholder="Share your experience (optional)"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black mb-4"
+          className="w-full px-3 py-2 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] mb-4 resize-none"
           rows="3"
         />
 
@@ -86,13 +86,13 @@ const RatingModal = ({ rideId, userRole, onClose, onSubmitted }) => {
           <button
             onClick={handleSubmit}
             disabled={loading}
-            className="flex-1 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition disabled:opacity-50 font-medium"
+            className="flex-1 py-2 bg-[#1A6BFF] text-white rounded-xl hover:bg-[#5294FF] transition disabled:opacity-50 font-medium shadow-lg shadow-[#1A6BFF]/30"
           >
             {loading ? 'Submitting...' : 'Submit Rating'}
           </button>
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
+            className="px-4 py-2 bg-[#1A2A4A] text-gray-300 rounded-xl hover:bg-[#2A3A5A] transition"
           >
             Skip
           </button>

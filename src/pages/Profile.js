@@ -1,50 +1,71 @@
-import React, { useState, useRef } from 'react';
-import { useAuth } from '../context/AuthContext';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { 
+  FaArrowLeft, 
   FaUser, 
-  FaPhone, 
   FaEnvelope, 
+  FaPhone, 
   FaCar, 
   FaCamera, 
-  FaStar, 
-  FaHistory,
-  FaArrowLeft,
-  FaEdit,
-  FaSave,
-  FaTimes,
-  FaWallet,
+  FaSave, 
   FaSignOutAlt,
-  FaArrowRight
+  FaStar,
+  FaCheckCircle,
+  FaShieldAlt
 } from 'react-icons/fa';
 import { API_URL } from '../config';
 
 const Profile = () => {
-  const { user, updateUser, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [editing, setEditing] = useState(false);
   const fileInputRef = useRef(null);
   
   const [formData, setFormData] = useState({
-    name: user?.name || '',
-    phone: user?.phone || '',
-    email: user?.email || '',
-    profilePhoto: user?.profilePhoto || '',
-    vehicle: user?.vehicle || { model: '', color: '', plateNumber: '', type: 'sedan' },
-    savedAddresses: user?.savedAddresses || []
+    name: '',
+    phone: '',
+    vehicle: {
+      model: '',
+      plateNumber: '',
+      color: '',
+      seats: 4
+    }
   });
+  const [isLoading, setIsLoading] = useState(false);
+  const [profilePhoto, setProfilePhoto] = useState('');
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
-  // ============ GET INITIALS FOR AVATAR ============
-  const getInitials = (name) => {
-    if (!name) return '?';
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  useEffect(() => {
+    if (user) {
+      setFormData({
+        name: user.name || '',
+        phone: user.phone || '',
+        vehicle: {
+          model: user.vehicle?.model || '',
+          plateNumber: user.vehicle?.plateNumber || '',
+          color: user.vehicle?.color || '',
+          seats: user.vehicle?.seats || 4
+        }
+      });
+      setProfilePhoto(user.profilePhoto || '');
+    }
+  }, [user]);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    if (name.startsWith('vehicle.')) {
+      const field = name.split('.')[1];
+      setFormData(prev => ({
+        ...prev,
+        vehicle: { ...prev.vehicle, [field]: value }
+      }));
+    } else {
+      setFormData(prev => ({ ...prev, [name]: value }));
+    }
   };
 
-  // ============ HANDLE PHOTO UPLOAD ============
   const handlePhotoUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -59,362 +80,278 @@ const Profile = () => {
       return;
     }
 
+    setUploadingPhoto(true);
     try {
-      setUploading(true);
-      toast.loading('Uploading photo...', { id: 'upload' });
-      
-      const formData = new FormData();
-      formData.append('photo', file);
-      
-      const token = localStorage.getItem('token');
-      const response = await axios.post(`${API_URL}/api/auth/upload-photo`, 
-        formData,
-        { 
-          headers: { 
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
-          },
-          timeout: 30000
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64String = reader.result;
+        const token = localStorage.getItem('token');
+        const response = await axios.post(
+          `${API_URL}/api/auth/upload-photo`,
+          { photoUrl: base64String },
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        
+        if (response.data.photoUrl) {
+          setProfilePhoto(response.data.photoUrl);
+          if (updateUser) {
+            updateUser({ profilePhoto: response.data.photoUrl });
+          }
+          toast.success('Profile photo updated!');
         }
-      );
-      
-      const photoUrl = response.data.photoUrl;
-      updateUser({ profilePhoto: photoUrl });
-      setFormData(prev => ({ ...prev, profilePhoto: photoUrl }));
-      
-      toast.dismiss('upload');
-      toast.success('Profile photo updated!');
-      
+      };
+      reader.readAsDataURL(file);
     } catch (error) {
-      console.error('❌ Upload error:', error);
-      toast.dismiss('upload');
       toast.error(error.response?.data?.error || 'Failed to upload photo');
     } finally {
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      setUploadingPhoto(false);
     }
   };
 
-  // ============ HANDLE SAVE PROFILE ============
-  const handleSave = async () => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+
     try {
-      setLoading(true);
       const token = localStorage.getItem('token');
-      await axios.put(`${API_URL}/api/auth/profile`, formData, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      updateUser(formData);
-      setEditing(false);
-      toast.success('Profile updated successfully!');
-    } catch (error) {
-      console.error('Save error:', error);
-      toast.error('Failed to update profile');
-    } finally {
-      setLoading(false);
-    }
-  };
+      const response = await axios.put(
+        `${API_URL}/api/auth/profile`,
+        formData,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
 
-  // ============ HANDLE CHANGE ============
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    if (name.includes('.')) {
-      const [parent, child] = name.split('.');
-      setFormData(prev => ({
-        ...prev,
-        [parent]: {
-          ...prev[parent],
-          [child]: value
+      if (response.data) {
+        if (updateUser) {
+          updateUser(response.data);
         }
-      }));
-    } else {
-      setFormData(prev => ({ ...prev, [name]: value }));
+        toast.success('Profile updated successfully!');
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Failed to update profile');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // ============ HANDLE LOGOUT ============
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
-  const vehicleTypes = [
-    { value: 'sedan', label: 'Sedan' },
-    { value: 'suv', label: 'SUV' },
-    { value: 'van', label: 'Van' },
-    { value: 'hatchback', label: 'Hatchback' },
-    { value: 'motorbike', label: 'Motorbike' }
-  ];
-
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header - Fixed with proper layout */}
-      <header className="bg-white border-b border-gray-100 px-4 py-3 flex justify-between items-center shadow-none sticky top-0 z-30">
+    <div className="min-h-screen bg-[#03060F]">
+      {/* Header - Dark theme */}
+      <header className="bg-[#080E1F] border-b border-[#1A2A4A] px-4 py-3 flex justify-between items-center shadow-none sticky top-0 z-30">
         <div className="flex items-center space-x-3">
-          <button 
-            onClick={() => navigate(-1)} 
-            className="text-gray-400 hover:text-black transition-colors"
+          <button
+            onClick={() => navigate(user?.role === 'driver' ? '/driver' : '/rider')}
+            className="text-gray-400 hover:text-white transition-colors"
           >
             <FaArrowLeft className="h-5 w-5" />
           </button>
           <div className="flex items-center">
-            <FaCar className="h-6 w-6 text-black mr-2" />
-            <h1 className="text-xl font-bold text-black">Vai</h1>
+            <div className="w-8 h-8 bg-[#1A6BFF] rounded-xl flex items-center justify-center text-white font-bold text-sm mr-2 shadow-lg shadow-[#1A6BFF]/30">
+              V
+            </div>
+            <h1 className="text-xl font-bold text-white">Vai</h1>
           </div>
-          <span className="text-sm text-gray-500 font-medium">
-            {user?.role === 'driver' ? 'Driver' : 'Rider'}
-          </span>
+          <span className="text-sm text-gray-400 font-medium">Profile</span>
         </div>
-        <div className="flex items-center space-x-4">
-          <button 
-            onClick={() => navigate('/history')} 
-            className="text-gray-400 hover:text-black transition-colors"
-          >
-            <FaHistory className="h-5 w-5" />
-          </button>
-          <button 
-            onClick={handleLogout} 
-            className="text-gray-400 hover:text-red-500 transition-colors"
-          >
-            <FaSignOutAlt className="h-5 w-5" />
-          </button>
-        </div>
+        <button
+          onClick={handleLogout}
+          className="text-gray-400 hover:text-red-400 transition-colors"
+        >
+          <FaSignOutAlt className="h-5 w-5" />
+        </button>
       </header>
 
-      {/* Main Content */}
       <div className="max-w-2xl mx-auto px-4 py-6">
-        {/* Profile Card */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-          {/* Profile Photo */}
-          <div className="flex flex-col items-center mb-6">
-            <div className="relative">
-              <div 
-                className="w-24 h-24 rounded-full bg-gray-200 overflow-hidden border-2 border-gray-300 cursor-pointer hover:opacity-80 transition"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                {formData.profilePhoto ? (
-                  <img 
-                    src={formData.profilePhoto} 
-                    alt={formData.name} 
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      e.target.style.display = 'none';
-                      e.target.parentElement.innerHTML = `
-                        <div class="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-blue-500 to-purple-500 text-white">
-                          ${getInitials(formData.name)}
-                        </div>
-                      `;
-                    }}
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-blue-500 to-purple-500 text-white">
-                    {getInitials(formData.name)}
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="absolute bottom-0 right-0 bg-black text-white p-2 rounded-full hover:bg-gray-800 transition disabled:opacity-50"
-              >
-                <FaCamera className="h-4 w-4" />
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handlePhotoUpload}
-                accept="image/*"
-                className="hidden"
-              />
+        {/* Profile Photo - Dark theme */}
+        <div className="flex flex-col items-center mb-8">
+          <div className="relative">
+            <div className="w-24 h-24 rounded-full bg-[#0E1A2A] border-2 border-[#1A2A4A] flex items-center justify-center overflow-hidden">
+              {profilePhoto ? (
+                <img src={profilePhoto} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <FaUser className="h-10 w-10 text-gray-500" />
+              )}
             </div>
-            {uploading && <p className="text-xs text-blue-500 mt-2 animate-pulse">Uploading...</p>}
-            <p className="text-xs text-gray-400 mt-1">Click photo to change</p>
-            <h2 className="text-xl font-bold mt-2">{user?.name}</h2>
-            <p className="text-gray-500 capitalize">{user?.role}</p>
-            {user?.role === 'driver' && (
-              <div className="flex items-center mt-1">
-                <FaStar className="text-yellow-500 mr-1" />
-                <span className="font-medium">{user?.rating?.average?.toFixed(1) || 'New'}</span>
-                <span className="text-gray-400 text-sm ml-1">({user?.rating?.count || 0} reviews)</span>
-              </div>
+            {user?.isVerified && (
+              <span className="absolute -bottom-1 -right-1 bg-[#1A6BFF] text-white text-[10px] rounded-full w-6 h-6 flex items-center justify-center border-2 border-[#080E1F]">
+                ✓
+              </span>
+            )}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingPhoto}
+              className="absolute -bottom-2 -right-2 p-2 bg-[#1A6BFF] text-white rounded-full hover:bg-[#5294FF] transition shadow-lg shadow-[#1A6BFF]/30 disabled:opacity-50"
+            >
+              <FaCamera className="h-4 w-4" />
+            </button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handlePhotoUpload}
+              accept="image/*"
+              className="hidden"
+            />
+          </div>
+          <h2 className="text-xl font-bold text-white mt-3">{user?.name}</h2>
+          <div className="flex items-center space-x-2 mt-1">
+            <span className="text-xs text-gray-400 capitalize">{user?.role}</span>
+            <span className="text-xs text-gray-500">•</span>
+            <span className="text-xs text-yellow-400 flex items-center">
+              <FaStar className="mr-1" /> {user?.rating?.average?.toFixed(1) || 'New'}
+            </span>
+            {user?.isVerified && (
+              <>
+                <span className="text-xs text-gray-500">•</span>
+                <span className="text-xs text-blue-400 flex items-center">
+                  <FaCheckCircle className="mr-1" /> Verified
+                </span>
+              </>
             )}
           </div>
+        </div>
 
-          {/* Edit Form or View Mode */}
-          {editing ? (
-            <div className="space-y-4">
+        {/* Profile Form - Dark theme */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">
+              Full Name
+            </label>
+            <div className="relative">
+              <FaUser className="absolute left-3.5 top-1/2 transform -translate-y-1/2 text-gray-500" />
+              <input
+                type="text"
+                name="name"
+                value={formData.name}
+                onChange={handleChange}
+                className="w-full pl-10 pr-4 py-3 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">
+              Email Address
+            </label>
+            <div className="relative">
+              <FaEnvelope className="absolute left-3.5 top-1/2 transform -translate-y-1/2 text-gray-500" />
+              <input
+                type="email"
+                value={user?.email || ''}
+                className="w-full pl-10 pr-4 py-3 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-gray-400 cursor-not-allowed"
+                disabled
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">
+              Phone Number
+            </label>
+            <div className="relative">
+              <FaPhone className="absolute left-3.5 top-1/2 transform -translate-y-1/2 text-gray-500" />
+              <input
+                type="tel"
+                name="phone"
+                value={formData.phone}
+                onChange={handleChange}
+                className="w-full pl-10 pr-4 py-3 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition"
+              />
+            </div>
+          </div>
+
+          {user?.role === 'driver' && (
+            <div className="space-y-3 border-t border-[#1A2A4A] pt-4">
+              <h3 className="text-sm font-medium text-gray-300 flex items-center">
+                <FaCar className="mr-2" /> Vehicle Details
+              </h3>
+              
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                <label className="block text-xs text-gray-500 mb-1">Model</label>
                 <input
                   type="text"
-                  name="name"
-                  value={formData.name}
+                  name="vehicle.model"
+                  value={formData.vehicle.model}
                   onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
+                  placeholder="Toyota Corolla"
+                  className="w-full px-4 py-2.5 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition text-sm"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                <input
-                  type="tel"
-                  name="phone"
-                  value={formData.phone}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
-                />
-              </div>
-              
-              {user?.role === 'driver' && (
-                <div className="border-t pt-4">
-                  <h3 className="text-sm font-medium text-gray-700 mb-3">Vehicle Details</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                      <input
-                        type="text"
-                        name="vehicle.model"
-                        value={formData.vehicle?.model || ''}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Color</label>
-                      <input
-                        type="text"
-                        name="vehicle.color"
-                        value={formData.vehicle?.color || ''}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Plate Number</label>
-                      <input
-                        type="text"
-                        name="vehicle.plateNumber"
-                        value={formData.vehicle?.plateNumber || ''}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                      <select
-                        name="vehicle.type"
-                        value={formData.vehicle?.type || 'sedan'}
-                        onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black"
-                      >
-                        {vehicleTypes.map(type => (
-                          <option key={type.value} value={type.value}>{type.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              )}
 
-              <div className="flex gap-2 mt-4">
-                <button
-                  onClick={handleSave}
-                  disabled={loading}
-                  className="flex-1 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition disabled:opacity-50 flex items-center justify-center"
-                >
-                  <FaSave className="mr-2" />
-                  {loading ? 'Saving...' : 'Save Changes'}
-                </button>
-                <button
-                  onClick={() => setEditing(false)}
-                  className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition flex items-center"
-                >
-                  <FaTimes className="mr-2" /> Cancel
-                </button>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Plate Number</label>
+                <input
+                  type="text"
+                  name="vehicle.plateNumber"
+                  value={formData.vehicle.plateNumber}
+                  onChange={handleChange}
+                  placeholder="CA 123-456"
+                  className="w-full px-4 py-2.5 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition text-sm"
+                />
               </div>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between py-2 border-b">
-                <span className="text-gray-500">Name</span>
-                <span className="font-medium flex items-center">
-                  {user?.profilePhoto && (
-                    <img 
-                      src={user.profilePhoto} 
-                      alt={user.name} 
-                      className="w-6 h-6 rounded-full object-cover mr-2"
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                      }}
-                    />
-                  )}
-                  {user?.name}
-                </span>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Color</label>
+                <input
+                  type="text"
+                  name="vehicle.color"
+                  value={formData.vehicle.color}
+                  onChange={handleChange}
+                  placeholder="White"
+                  className="w-full px-4 py-2.5 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition text-sm"
+                />
               </div>
-              <div className="flex items-center justify-between py-2 border-b">
-                <span className="text-gray-500">Phone</span>
-                <span className="font-medium">{user?.phone}</span>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Seats</label>
+                <input
+                  type="number"
+                  name="vehicle.seats"
+                  value={formData.vehicle.seats}
+                  onChange={handleChange}
+                  min="1"
+                  max="7"
+                  className="w-full px-4 py-2.5 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition text-sm"
+                />
               </div>
-              <div className="flex items-center justify-between py-2 border-b">
-                <span className="text-gray-500">Email</span>
-                <span className="font-medium">{user?.email}</span>
-              </div>
-              {user?.role === 'driver' && user?.vehicle && (
-                <div className="flex items-center justify-between py-2 border-b">
-                  <span className="text-gray-500">Vehicle</span>
-                  <span className="font-medium">
-                    {user.vehicle.color} {user.vehicle.model} ({user.vehicle.plateNumber})
-                  </span>
-                </div>
-              )}
-              {user?.role === 'driver' && (
-                <div className="flex items-center justify-between py-2 border-b">
-                  <span className="text-gray-500">Approval Status</span>
-                  <span className={`font-medium ${user?.driverApproval?.isApproved ? 'text-green-600' : 'text-yellow-600'}`}>
-                    {user?.driverApproval?.isApproved ? '✅ Approved' : '⏳ Pending Approval'}
-                  </span>
-                </div>
-              )}
-              {user?.driverApproval?.reference && (
-                <div className="flex items-center justify-between py-2 border-b">
-                  <span className="text-gray-500">Driver Reference</span>
-                  <span className="font-mono font-medium text-sm">{user.driverApproval.reference}</span>
-                </div>
-              )}
-              <div className="flex items-center justify-between py-2 border-b">
-                <span className="text-gray-500">Total Trips</span>
-                <span className="font-medium">{user?.totalTrips || 0}</span>
-              </div>
-              
-              <button
-                onClick={() => setEditing(true)}
-                className="w-full mt-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition flex items-center justify-center"
-              >
-                <FaEdit className="mr-2" /> Edit Profile
-              </button>
             </div>
           )}
-        </div>
 
-        {/* Ratings Section */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mt-4">
-          <h3 className="font-bold mb-4 flex items-center">
-            <FaStar className="text-yellow-500 mr-2" /> Ratings & Reviews
-          </h3>
-          <div className="text-center py-4 text-gray-500">
-            <p className="text-sm">No ratings yet</p>
-            <p className="text-xs">Complete rides to receive ratings</p>
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full py-3 bg-[#1A6BFF] text-white rounded-xl font-semibold hover:bg-[#5294FF] transition disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-[#1A6BFF]/30 flex items-center justify-center"
+          >
+            {isLoading ? (
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+            ) : (
+              <>
+                <FaSave className="mr-2" /> Save Changes
+              </>
+            )}
+          </button>
+        </form>
+
+        {/* Account Info - Dark theme */}
+        <div className="mt-6 p-4 bg-[#0E1A2A] rounded-xl border border-[#1A2A4A]">
+          <h4 className="text-xs font-medium text-gray-500 mb-2">Account Information</h4>
+          <div className="space-y-1 text-xs text-gray-400">
+            <p>Member since: {user?.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'N/A'}</p>
+            <p>Account type: <span className="capitalize">{user?.role}</span></p>
+            {user?.totalTrips > 0 && (
+              <p>Total trips: {user.totalTrips}</p>
+            )}
+            {user?.role === 'driver' && user?.driverApproval?.reference && (
+              <p className="flex items-center">
+                <FaShieldAlt className="mr-1 text-xs" />
+                Reference: <span className="font-mono ml-1 text-white">{user.driverApproval.reference}</span>
+              </p>
+            )}
           </div>
         </div>
-
-        {/* History Button */}
-        <button
-          onClick={() => navigate('/history')}
-          className="w-full mt-4 py-3 bg-gray-100 rounded-xl hover:bg-gray-200 transition flex items-center justify-center text-gray-700 font-medium"
-        >
-          <FaHistory className="mr-2" /> View Ride History
-          <FaArrowRight className="ml-2 h-4 w-4" />
-        </button>
       </div>
     </div>
   );

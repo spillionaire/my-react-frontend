@@ -72,27 +72,27 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8 max-w-md w-full">
-        {/* Logo with Car Icon - BLACK BACKGROUND */}
+    <div className="min-h-screen flex items-center justify-center bg-[#03060F] p-4">
+      <div className="bg-[#0E1A2A] rounded-2xl shadow-xl p-6 md:p-8 max-w-md w-full border border-[#1A2A4A]">
+        {/* Logo with Car Icon */}
         <div className="text-center mb-8">
           <div className="flex justify-center mb-3">
-            <div className="bg-black rounded-full p-5">
+            <div className="bg-[#1A6BFF] rounded-full p-5 shadow-lg shadow-[#1A6BFF]/30">
               <FaCar className="h-12 w-12 text-white" />
             </div>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Welcome to Vai</h1>
-          <p className="text-gray-500 text-sm mt-1">
+          <h1 className="text-2xl font-bold text-white">Welcome to Vai</h1>
+          <p className="text-gray-400 text-sm mt-1">
             {isDriverLogin ? 'Login with your driver reference' : 'Sign in to your account'}
           </p>
         </div>
 
         {/* Toggle Login Mode */}
-        <div className="flex rounded-lg bg-gray-100 p-1 mb-6">
+        <div className="flex rounded-lg bg-[#080E1F] p-1 mb-6 border border-[#1A2A4A]">
           <button
             onClick={() => setIsDriverLogin(false)}
             className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
-              !isDriverLogin ? 'bg-white shadow-sm text-black' : 'text-gray-500'
+              !isDriverLogin ? 'bg-[#1A6BFF] text-white shadow-lg shadow-[#1A6BFF]/20' : 'text-gray-400 hover:text-white'
             }`}
           >
             <FaUser className="inline mr-2" /> Rider
@@ -100,7 +100,7 @@ const Login = () => {
           <button
             onClick={() => setIsDriverLogin(true)}
             className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
-              isDriverLogin ? 'bg-white shadow-sm text-black' : 'text-gray-500'
+              isDriverLogin ? 'bg-[#1A6BFF] text-white shadow-lg shadow-[#1A6BFF]/20' : 'text-gray-400 hover:text-white'
             }`}
           >
             <FaKey className="inline mr-2" /> Driver
@@ -111,38 +111,38 @@ const Login = () => {
           {isDriverLogin ? (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-300 mb-1">
                   Driver Reference Code
                 </label>
                 <div className="relative">
-                  <FaKey className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <FaKey className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
                   <input
                     type="text"
                     name="referenceCode"
                     value={formData.referenceCode}
                     onChange={handleChange}
                     placeholder="e.g. DRV-2024-0001"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black transition"
+                    className="w-full pl-10 pr-4 py-3 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition"
                     required
                   />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-gray-500 mt-1">
                   Enter your driver reference provided after approval
                 </p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-300 mb-1">
                   Password
                 </label>
                 <div className="relative">
-                  <FaLock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <FaLock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
                   <input
                     type="password"
                     name="password"
                     value={formData.password}
                     onChange={handleChange}
                     placeholder="Enter your password"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black transition"
+                    className="w-full pl-10 pr-4 py-3 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition"
                     required
                   />
                 </div>
@@ -151,40 +151,40 @@ const Login = () => {
           ) : (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-300 mb-1">
                   Email Address
                 </label>
                 <div className="relative">
-                  <FaEnvelope className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <FaEnvelope className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
                   <input
                     type="email"
                     name="email"
                     value={formData.email}
                     onChange={handleChange}
                     placeholder="you@example.com"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black transition"
+                    className="w-full pl-10 pr-4 py-3 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition"
                     required
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-300 mb-1">
                   Password
                 </label>
                 <div className="relative">
-                  <FaLock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                  <FaLock className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
                   <input
                     type="password"
                     name="password"
                     value={formData.password}
                     onChange={handleChange}
                     placeholder="Enter your password"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black transition"
+                    className="w-full pl-10 pr-4 py-3 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition"
                     required
                   />
                 </div>
                 <div className="text-right mt-1">
-                  <Link to="/forgot-password" className="text-xs text-gray-500 hover:text-black transition">
+                  <Link to="/forgot-password" className="text-xs text-[#1A6BFF] hover:text-[#5294FF] transition">
                     Forgot password?
                   </Link>
                 </div>
@@ -195,7 +195,7 @@ const Login = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition disabled:opacity-50 font-medium flex items-center justify-center"
+            className="w-full py-3 bg-[#1A6BFF] text-white rounded-xl hover:bg-[#5294FF] transition disabled:opacity-50 font-medium flex items-center justify-center shadow-lg shadow-[#1A6BFF]/30"
           >
             {loading ? (
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
@@ -211,44 +211,52 @@ const Login = () => {
         {/* Divider */}
         <div className="relative my-6">
           <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-gray-200"></div>
+            <div className="w-full border-t border-[#1A2A4A]"></div>
           </div>
           <div className="relative flex justify-center text-sm">
-            <span className="px-4 bg-white text-gray-400">or continue with</span>
+            <span className="px-4 bg-[#0E1A2A] text-gray-500">or continue with</span>
           </div>
         </div>
 
-        
+        {/* Social Buttons */}
+        <div className="grid grid-cols-2 gap-3">
+          <button className="py-2.5 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-gray-400 hover:text-white hover:border-[#1A6BFF] transition flex items-center justify-center">
+            <FaGoogle className="h-5 w-5" />
+            <span className="ml-2 text-sm">Google</span>
+          </button>
+          <button className="py-2.5 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-gray-400 hover:text-white hover:border-[#1A6BFF] transition flex items-center justify-center">
+            <FaFacebook className="h-5 w-5" />
+            <span className="ml-2 text-sm">Facebook</span>
+          </button>
+        </div>
 
         {/* Footer Links */}
         <div className="mt-6 text-center">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-400">
             Don't have an account?{' '}
-            <Link to="/register" className="text-black font-medium hover:underline">
+            <Link to="/register" className="text-[#1A6BFF] font-medium hover:text-[#5294FF] transition">
               Sign up
             </Link>
           </p>
           {!isDriverLogin ? (
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="text-sm text-gray-400 mt-2">
               Are you a driver?{' '}
               <button 
                 onClick={toggleLoginMode} 
-                className="text-black font-medium hover:underline"
+                className="text-[#1A6BFF] font-medium hover:text-[#5294FF] transition"
               >
                 Login with reference
               </button>
             </p>
           ) : (
-            <p className="text-sm text-gray-500 mt-2">
+            <p className="text-sm text-gray-400 mt-2">
               Need a driver reference?{' '}
-              <Link to="/driver-apply" className="text-black font-medium hover:underline">
+              <Link to="/driver-apply" className="text-[#1A6BFF] font-medium hover:text-[#5294FF] transition">
                 Apply now
               </Link>
             </p>
           )}
         </div>
-
-       
       </div>
     </div>
   );

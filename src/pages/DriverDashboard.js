@@ -24,7 +24,10 @@ import {
   FaQuestionCircle,
   FaStar,
   FaPhone,
-  FaInfoCircle
+  FaInfoCircle,
+  FaExclamationTriangle,
+  FaShieldAlt,
+  FaCheckCircle
 } from 'react-icons/fa';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -42,8 +45,10 @@ import {
 import { getCarIconUrl } from '../assets/car-icon';
 import Chat from '../components/Chat';
 import RatingModal from '../components/RatingModal';
+import ProfileDropdown from '../components/ProfileDropdown';
 import { API_URL } from '../config';
 import { getLocationWithFallback, isGPSAvailable, isHTTPSRequired, getGPSErrorMessage } from '../utils/location';
+import { playRideRequestSound, playRideAcceptedSound, playArrivedSound } from '../utils/sounds';
 
 // Fix for default marker icons
 delete L.Icon.Default.prototype._getIconUrl;
@@ -182,13 +187,15 @@ const DriverDashboard = () => {
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [rideToRate, setRideToRate] = useState(null);
   
+  // Deactivation Modal
+  const [showDeactivationModal, setShowDeactivationModal] = useState(false);
+  
   const watchIdRef = useRef(null);
   const mapRef = useRef();
   const locationAttempted = useRef(false);
   const activeRideFetched = useRef(false);
 
   // ============ PERSIST ROUTE DATA ============
-  // Save route data to localStorage whenever it changes
   useEffect(() => {
     if (driverRoute && driverRoute.length > 0) {
       try {
@@ -214,16 +221,6 @@ const DriverDashboard = () => {
         if (parsed && parsed.length > 0) {
           setDriverRoute(parsed);
           console.log('🔄 Restored driver route from localStorage:', parsed.length, 'points');
-          
-          // Check if the ride is still active
-          if (savedStatus && savedStatus !== 'completed' && savedStatus !== 'cancelled') {
-            // Keep the route
-          } else {
-            // Clear if ride is completed or cancelled
-            localStorage.removeItem('driverRoutePoints');
-            localStorage.removeItem('driverRideId');
-            localStorage.removeItem('driverRideStatus');
-          }
         }
       }
     } catch (error) {
@@ -244,6 +241,14 @@ const DriverDashboard = () => {
     const restoreOnlineStatus = async () => {
       try {
         if (user?.isOnline && user?.role === 'driver') {
+          if (user?.isDeactivated) {
+            console.log('❌ Account deactivated, cannot restore online status');
+            setIsAvailable(false);
+            setShowDeactivationModal(true);
+            setIsRestoring(false);
+            return;
+          }
+          
           console.log('🔄 Restoring online status for driver:', user.name);
           setIsAvailable(true);
           if (socket) {
@@ -299,7 +304,6 @@ const DriverDashboard = () => {
             setRiderInfo(ride.rider);
           }
           
-          // Restore route points from ride if available
           if (ride.routePoints && ride.routePoints.length > 0) {
             setDriverRoute(ride.routePoints);
             console.log('🔄 Restored route points from ride:', ride.routePoints.length);
@@ -308,13 +312,11 @@ const DriverDashboard = () => {
           if (ride.status === 'in-progress' && ride.startLocation) {
             setRideStartLocation(ride.startLocation);
             setRideStartTime(ride.startTime);
-            // Draw route to dropoff when ride is in progress
             if (!ride.routePoints || ride.routePoints.length === 0) {
               drawRouteToDropoff(ride);
             }
           }
           
-          // If ride is accepted, draw route to pickup
           if (ride.status === 'accepted' || ride.status === 'arrived') {
             if (!ride.routePoints || ride.routePoints.length === 0) {
               drawRouteToPickup(ride);
@@ -397,6 +399,8 @@ const DriverDashboard = () => {
           speed: position.coords.speed || 0
         };
 
+        console.log('📍 Driver location update:', location);
+
         if (position.coords.speed !== null) {
           setSpeed(position.coords.speed * 3.6);
         }
@@ -422,7 +426,6 @@ const DriverDashboard = () => {
           );
           setRideDistanceTraveled(dist);
           
-          // Update driver location on route if ride is in progress
           if (currentRide && currentRide.dropoffLocation) {
             updateRouteToDropoff(location);
           }
@@ -448,7 +451,6 @@ const DriverDashboard = () => {
             setShowManualArrival(true);
           }
           
-          // Update route to pickup as driver moves
           updateRouteToPickup(location);
         }
 
@@ -460,24 +462,35 @@ const DriverDashboard = () => {
           });
         }
 
-        if (socket) {
-          socket.emit('driver-location', {
-            driverId: user?._id,
-            location,
-            rotation: carRotation,
-            speed: position.coords.speed || 0,
-            rideId: currentRide?._id || null,
-            distanceToPickup: distanceToPickup,
-            eta: eta
-          });
+        // ============ BROADCAST LOCATION TO SERVER ============
+        if (isAvailable || currentRide) {
+          if (socket) {
+            const locationData = {
+              driverId: user?._id,
+              location: location,
+              rotation: carRotation,
+              speed: position.coords.speed || 0,
+              rideId: currentRide?._id || null,
+              distanceToPickup: distanceToPickup,
+              eta: eta,
+              isAvailable: isAvailable,
+              status: isAvailable ? 'available' : 'busy'
+            };
+            
+            console.log('📡 Broadcasting driver location:', locationData);
+            socket.emit('driver-location', locationData);
+          }
         }
 
+        // Also update location in database
         if (isAvailable) {
           axios.put(`${API_URL}/api/auth/location`, { location })
             .catch(() => {});
         }
       },
-      () => {},
+      (error) => {
+        console.error('❌ GPS error:', error);
+      },
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 2000 }
     );
 
@@ -512,7 +525,6 @@ const DriverDashboard = () => {
     if (!ride || !ride.pickupLocation) return;
     
     try {
-      // Try to get actual road route from API
       const routePoints = await fetchRouteFromAPI(
         currentLocation.lat,
         currentLocation.lng,
@@ -523,10 +535,8 @@ const DriverDashboard = () => {
       if (routePoints && routePoints.length > 1) {
         setDriverRoute(routePoints);
         console.log('📍 Route to pickup from API:', routePoints.length, 'points');
-        // Save to localStorage
         localStorage.setItem('driverRoutePoints', JSON.stringify(routePoints));
       } else {
-        // Fallback to curved line if API fails
         const route = getRoutePointsWithCurve(
           currentLocation, 
           ride.pickupLocation, 
@@ -554,7 +564,6 @@ const DriverDashboard = () => {
     
     if (rideStatus === 'accepted' && !isAtPickup) {
       try {
-        // Only update every 10 seconds to avoid too many API calls
         const lastUpdate = localStorage.getItem('lastDriverRouteUpdate');
         const now = Date.now();
         if (lastUpdate && now - parseInt(lastUpdate) < 10000) {
@@ -584,7 +593,6 @@ const DriverDashboard = () => {
     if (!ride || !ride.dropoffLocation) return;
     
     try {
-      // Try to get actual road route from API
       const routePoints = await fetchRouteFromAPI(
         currentLocation.lat,
         currentLocation.lng,
@@ -597,7 +605,6 @@ const DriverDashboard = () => {
         console.log('📍 Route to dropoff from API:', routePoints.length, 'points');
         localStorage.setItem('driverRoutePoints', JSON.stringify(routePoints));
       } else {
-        // Fallback to curved line if API fails
         const route = getRoutePointsWithCurve(
           currentLocation, 
           ride.dropoffLocation, 
@@ -625,7 +632,6 @@ const DriverDashboard = () => {
     
     if (rideStatus === 'in-progress') {
       try {
-        // Only update every 10 seconds to avoid too many API calls
         const lastUpdate = localStorage.getItem('lastDriverRouteUpdate');
         const now = Date.now();
         if (lastUpdate && now - parseInt(lastUpdate) < 10000) {
@@ -732,7 +738,8 @@ const DriverDashboard = () => {
       setShowManualArrival(false);
       setRideStatus('arrived');
       
-      // Clear route to pickup once arrived
+      playArrivedSound();
+      
       setDriverRoute([]);
       localStorage.removeItem('driverRoutePoints');
       
@@ -848,13 +855,11 @@ const DriverDashboard = () => {
       setEarlyCompletionReason('');
       setEarlyCompletionNote('');
 
-      // Clear route on completion
       setDriverRoute([]);
       localStorage.removeItem('driverRoutePoints');
       localStorage.removeItem('driverRideId');
       localStorage.removeItem('driverRideStatus');
 
-      // Show rating modal after completion
       setTimeout(() => {
         setRideToRate(currentRide);
         setShowRatingModal(true);
@@ -950,7 +955,6 @@ const DriverDashboard = () => {
       setRideStartTime(null);
       setRideDistanceTraveled(0);
       
-      // Clear route on cancellation
       localStorage.removeItem('driverRoutePoints');
       localStorage.removeItem('driverRideId');
       localStorage.removeItem('driverRideStatus');
@@ -974,6 +978,14 @@ const DriverDashboard = () => {
   // ============ TOGGLE AVAILABILITY ============
   const toggleAvailability = async () => {
     try {
+      if (user?.isDeactivated) {
+        toast.error('Your account has been deactivated. Please contact support.', { 
+          duration: 5000 
+        });
+        setShowDeactivationModal(true);
+        return;
+      }
+
       setIsLoading(true);
       const newStatus = !isAvailable;
       const token = localStorage.getItem('token');
@@ -1026,7 +1038,8 @@ const DriverDashboard = () => {
         setRiderInfo(response.data.rider);
       }
       
-      // DRAW ROUTE TO PICKUP when ride is accepted
+      playRideAcceptedSound();
+      
       await drawRouteToPickup(response.data);
       
       toast.success('✅ Ride accepted! Navigating to pickup');
@@ -1061,7 +1074,7 @@ const DriverDashboard = () => {
     }
   };
 
-  // ============ START RIDE - WITH ROUTE TO DROPOFF ============
+  // ============ START RIDE ============
   const startRide = async () => {
     try {
       setIsLoading(true);
@@ -1110,7 +1123,6 @@ const DriverDashboard = () => {
       if (started) {
         setRideStatus('in-progress');
         
-        // DRAW ROUTE TO DROPOFF when ride starts
         await drawRouteToDropoff(currentRide);
         
         if (socket) {
@@ -1134,7 +1146,6 @@ const DriverDashboard = () => {
 
   // ============ HANDLE LOGOUT ============
   const handleLogout = () => {
-    // Clear route data on logout
     localStorage.removeItem('driverRoutePoints');
     localStorage.removeItem('driverRideId');
     localStorage.removeItem('driverRideStatus');
@@ -1171,6 +1182,9 @@ const DriverDashboard = () => {
 
     socket.on('new-ride-request', (ride) => {
       console.log('🚗 New ride request received:', ride);
+      
+      playRideRequestSound();
+      
       if (isAvailable) {
         setRideRequests(prev => {
           const exists = prev.some(r => r.rideId === ride.rideId);
@@ -1233,7 +1247,6 @@ const DriverDashboard = () => {
         setRideStartTime(null);
         setRideDistanceTraveled(0);
         
-        // Clear route data
         localStorage.removeItem('driverRoutePoints');
         localStorage.removeItem('driverRideId');
         localStorage.removeItem('driverRideStatus');
@@ -1283,6 +1296,7 @@ const DriverDashboard = () => {
 
     socket.on(`ride-${currentRide?._id}-accepted`, (data) => {
       if (data.driverId === user?._id) {
+        playRideAcceptedSound();
         toast.success('✅ Ride accepted! Proceed to pickup');
         setArrivalChecked(false);
         setIsAtPickup(false);
@@ -1375,7 +1389,7 @@ const DriverDashboard = () => {
     });
 
     socket.on('drivers-update', (drivers) => {
-      console.log('Online drivers:', drivers.length);
+      console.log('📡 Received drivers update:', drivers.length);
     });
 
     socket.on('new-message', (msg) => {
@@ -1383,6 +1397,15 @@ const DriverDashboard = () => {
         setUnreadMessages(prev => prev + 1);
         const senderName = msg.senderRole === 'rider' ? (currentRide?.rider?.name || 'Rider') : 'Driver';
         toast.success(`💬 ${senderName}: ${msg.message}`, { duration: 3000, icon: '💬' });
+      }
+    });
+
+    socket.on('account-deactivated', (data) => {
+      toast.error('Your account has been deactivated. Please contact support.', { duration: 8000 });
+      setShowDeactivationModal(true);
+      setIsAvailable(false);
+      if (updateUser) {
+        updateUser({ isDeactivated: true, isAvailable: false, isOnline: false });
       }
     });
 
@@ -1396,6 +1419,7 @@ const DriverDashboard = () => {
       socket.off(`driver-${user?._id}-ride-cancelled`);
       socket.off('drivers-update');
       socket.off('new-message');
+      socket.off('account-deactivated');
     };
   }, [socket, isAvailable, currentRide, user, currentLocation]);
 
@@ -1420,10 +1444,10 @@ const DriverDashboard = () => {
 
   if (isRestoring) {
     return (
-      <div className="h-screen flex items-center justify-center bg-gray-50">
+      <div className="h-screen flex items-center justify-center bg-[#03060F]">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
-          <p className="text-gray-500">Restoring...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1A6BFF] mx-auto mb-4"></div>
+          <p className="text-gray-400">Restoring...</p>
         </div>
       </div>
     );
@@ -1439,62 +1463,107 @@ const DriverDashboard = () => {
     return '';
   };
 
+  // Get rating display
+  const getRatingDisplay = () => {
+    const avg = user?.rating?.average || 0;
+    if (avg === 0) return 'New';
+    return `${avg.toFixed(1)} ★`;
+  };
+
   return (
-    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
-      {/* Header */}
-      <header className="w-full bg-white border-b border-gray-100 px-4 py-3 flex justify-between items-center shadow-none z-30 flex-shrink-0">
+    <div className="h-screen flex flex-col bg-[#03060F] overflow-hidden">
+      {/* Header - Dark theme */}
+      <header className="w-full bg-[#080E1F] border-b border-[#1A2A4A] px-4 py-3 flex justify-between items-center shadow-none z-30 flex-shrink-0">
         <div className="flex items-center space-x-3">
           <div className="flex items-center">
-            <FaCar className="h-6 w-6 text-black mr-2" />
-            <h1 className="text-xl font-bold text-black">Vai</h1>
+            <div className="w-8 h-8 bg-[#1A6BFF] rounded-xl flex items-center justify-center text-white font-bold text-sm mr-2 shadow-lg shadow-[#1A6BFF]/30">
+              V
+            </div>
+            <h1 className="text-xl font-bold text-white">Vai</h1>
           </div>
           <button 
             onClick={() => navigate('/profile')} 
-            className="text-sm text-gray-500 hover:text-black transition-colors font-medium"
+            className="text-sm text-gray-400 hover:text-white transition-colors font-medium"
           >
-            {user?.role === 'driver' ? 'Driver' : 'Rider'}
+            Driver
           </button>
           {isGettingLocation && (
-            <span className="text-[10px] text-gray-400">📍 GPS</span>
+            <span className="text-[10px] text-gray-500">📍 GPS</span>
           )}
           {isAvailable && (
-            <span className="text-[10px] text-green-500">● Online</span>
+            <span className="text-[10px] text-green-400">● Online</span>
           )}
           {isAtPickup && (
-            <span className="text-[10px] text-purple-500">📍 Arrived</span>
+            <span className="text-[10px] text-purple-400">📍 Arrived</span>
           )}
           {rideRequests.length > 0 && (
-            <span className="text-[10px] text-red-500 font-medium">
+            <span className="text-[10px] text-red-400 font-medium">
               {rideRequests.length} 📬
             </span>
           )}
           {speed > 5 && (
-            <span className="text-[10px] text-blue-500">{Math.round(speed)} km/h</span>
+            <span className="text-[10px] text-blue-400">{Math.round(speed)} km/h</span>
+          )}
+          {user?.isVerified && (
+            <span className="text-[10px] text-blue-400 flex items-center">
+              <FaCheckCircle className="mr-0.5" /> Verified
+            </span>
           )}
         </div>
         <div className="flex items-center space-x-4">
           {!isMobile && (
             <button 
               onClick={() => navigate('/history')} 
-              className="text-gray-400 hover:text-black transition-colors"
+              className="text-gray-400 hover:text-white transition-colors"
             >
               <FaHistory className="h-5 w-5" />
             </button>
           )}
           <button 
             onClick={() => setShowDebug(!showDebug)} 
-            className="text-gray-400 hover:text-black transition-colors"
+            className="text-gray-400 hover:text-white transition-colors"
           >
             <FaBug className="h-5 w-5" />
           </button>
-          <button 
-            onClick={handleLogout} 
-            className="text-gray-400 hover:text-red-500 transition-colors"
-          >
-            <FaSignOutAlt className="h-5 w-5" />
-          </button>
+          <ProfileDropdown user={user} logout={handleLogout} />
         </div>
       </header>
+
+      {/* Deactivation Modal - Dark theme */}
+      {showDeactivationModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-[#0E1A2A] rounded-2xl p-6 max-w-md w-full border border-[#1A2A4A]">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FaExclamationTriangle className="text-red-400 text-3xl" />
+              </div>
+              <h3 className="text-xl font-bold text-red-400 mb-2">Account Deactivated</h3>
+              <p className="text-gray-400 mb-4">
+                Your account has been deactivated. Please contact support for more information.
+              </p>
+              <div className="bg-[#080E1F] p-3 rounded-lg mb-4 text-left border border-[#1A2A4A]">
+                <p className="text-sm text-gray-500">Reason:</p>
+                <p className="text-sm text-white">{user?.deactivationReason || 'No reason provided'}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowDeactivationModal(false);
+                  navigate('/support');
+                }}
+                className="w-full py-2 bg-[#1A6BFF] text-white rounded-lg hover:bg-[#5294FF] transition"
+              >
+                Contact Support
+              </button>
+              <button
+                onClick={() => setShowDeactivationModal(false)}
+                className="w-full mt-2 py-2 bg-[#1A2A4A] text-gray-300 rounded-lg hover:bg-[#2A3A5A] transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Map */}
       <div className="flex-1 relative overflow-hidden">
@@ -1531,16 +1600,21 @@ const DriverDashboard = () => {
             rotationOrigin="center"
           >
             <Popup>
-              <div className="text-center">
+              <div className="text-center bg-[#0E1A2A] text-white">
                 <p className="font-bold">🚗 You are here</p>
-                <p className="text-xs text-gray-500">{user?.name}</p>
-                <p className="text-xs text-gray-500">{user?.vehicle?.model} • {user?.vehicle?.color}</p>
-                {isAtPickup && <p className="text-xs text-green-600 font-bold">📍 Arrived!</p>}
+                <p className="text-xs text-gray-400">{user?.name}</p>
+                <p className="text-xs text-gray-400">{user?.vehicle?.model} • {user?.vehicle?.color}</p>
+                {isAtPickup && <p className="text-xs text-green-400 font-bold">📍 Arrived!</p>}
                 {distanceToPickup !== null && !isAtPickup && (
                   <p className="text-xs text-gray-400">{formatDistance(distanceToPickup)} to pickup</p>
                 )}
                 {rideStatus === 'in-progress' && (
                   <p className="text-xs text-gray-400">{formatDistance(rideDistanceTraveled)} traveled</p>
+                )}
+                {user?.isVerified && (
+                  <p className="text-xs text-blue-400 flex items-center justify-center mt-1">
+                    <FaCheckCircle className="mr-1" /> Verified Driver
+                  </p>
                 )}
               </div>
             </Popup>
@@ -1553,15 +1627,15 @@ const DriverDashboard = () => {
                 icon={pickupIcon}
               >
                 <Popup>
-                  <div className="text-center">
-                    <p className="font-bold text-green-600">📍 Pickup</p>
-                    <p className="text-xs text-gray-500">{currentRide.pickupLocation.address}</p>
+                  <div className="text-center bg-[#0E1A2A] text-white">
+                    <p className="font-bold text-green-400">📍 Pickup</p>
+                    <p className="text-xs text-gray-400">{currentRide.pickupLocation.address}</p>
                     {distanceToPickup !== null && rideStatus !== 'arrived' && (
                       <p className="text-xs text-gray-400">{formatDistance(distanceToPickup)} away</p>
                     )}
-                    {isAtPickup && <p className="text-xs text-green-600 font-bold">✅ Arrived!</p>}
+                    {isAtPickup && <p className="text-xs text-green-400 font-bold">✅ Arrived!</p>}
                     {eta !== null && rideStatus === 'accepted' && !isAtPickup && (
-                      <p className="text-xs text-gray-400">ETA: {formatTime(eta)}</p>
+                      <p className="text-xs text-green-400">ETA: {formatTime(eta)}</p>
                     )}
                   </div>
                 </Popup>
@@ -1571,9 +1645,9 @@ const DriverDashboard = () => {
                 icon={dropoffIcon}
               >
                 <Popup>
-                  <div className="text-center">
-                    <p className="font-bold text-red-600">🏁 Dropoff</p>
-                    <p className="text-xs text-gray-500">{currentRide.dropoffLocation.address}</p>
+                  <div className="text-center bg-[#0E1A2A] text-white">
+                    <p className="font-bold text-red-400">🏁 Dropoff</p>
+                    <p className="text-xs text-gray-400">{currentRide.dropoffLocation.address}</p>
                     {rideStatus === 'in-progress' && (
                       <p className="text-xs text-gray-400">{formatDistance(rideDistanceTraveled)} traveled</p>
                     )}
@@ -1583,11 +1657,11 @@ const DriverDashboard = () => {
             </>
           )}
           
-          {/* Driver Route Line - BLACK color */}
+          {/* Driver Route Line - BLUE color */}
           {driverRoute.length > 0 && (
             <Polyline
               positions={driverRoute.map(p => [p.lat, p.lng])}
-              color="#000000"
+              color="#1A6BFF"
               weight={4}
               opacity={0.8}
               smoothFactor={1}
@@ -1597,54 +1671,56 @@ const DriverDashboard = () => {
           {routePoints.length > 1 && (
             <Polyline
               positions={routePoints.map(p => [p.lat, p.lng])}
-              color="#666666"
+              color="#1A2A4A"
               weight={2}
               opacity={0.3}
             />
           )}
         </MapContainer>
 
-        {/* Loading overlay */}
+        {/* Loading overlay - Dark theme */}
         {(tileLoading || !mapLoaded) && (
-          <div className="absolute inset-0 bg-gray-100 flex flex-col items-center justify-center z-10">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-black mb-3"></div>
-            <p className="text-gray-500 text-sm">Loading map...</p>
+          <div className="absolute inset-0 bg-[#080E1F] flex flex-col items-center justify-center z-10">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#1A6BFF] mb-3"></div>
+            <p className="text-gray-400 text-sm">Loading map...</p>
           </div>
         )}
 
         {/* Location error */}
         {locationError && !isGettingLocation && (
-          <div className="absolute top-2 left-1/2 transform -translate-x-1/2 bg-orange-500 text-white px-3 py-1 rounded-lg shadow-lg text-xs z-30">
+          <div className="absolute top-2 left-1/2 transform -translate-x-1/2 bg-orange-500/90 text-white px-3 py-1 rounded-xl shadow-lg text-xs z-30 backdrop-blur-sm">
             {locationError}
           </div>
         )}
 
-        {/* Debug Panel */}
+        {/* Debug Panel - Dark theme */}
         {showDebug && (
-          <div className="absolute top-2 left-2 bg-black/90 text-white p-3 rounded-lg z-50 max-w-xs text-xs font-mono overflow-auto max-h-60">
-            <p className="font-bold mb-1">🐛 Debug Info</p>
-            <p>Ride Status: {rideStatus || 'none'}</p>
-            <p>Driver ID: {user?._id?.slice(-6) || 'none'}</p>
-            <p>Is At Pickup: {isAtPickup ? '✅' : '❌'}</p>
-            <p>Arrival Checked: {arrivalChecked ? '✅' : '❌'}</p>
-            <p>Distance: {distanceToPickup !== null ? formatDistance(distanceToPickup) : '--'}</p>
-            <p>ETA: {eta !== null ? formatTime(eta) : '--'}</p>
-            <p>Speed: {speed > 0 ? `${Math.round(speed)} km/h` : '--'}</p>
-            <p>Socket: {socket?.isConnected ? '✅ Connected' : '❌'}</p>
-            <p>Ride ID: {currentRide?._id?.slice(-6) || 'none'}</p>
-            <p>Distance Traveled: {formatDistance(rideDistanceTraveled)}</p>
-            <p>Route Points: {driverRoute.length}</p>
-            <p className="text-yellow-300 text-[10px] mt-1">Pickup: {currentRide?.pickupLocation?.lat?.toFixed(4)}, {currentRide?.pickupLocation?.lng?.toFixed(4)}</p>
+          <div className="absolute top-2 left-2 bg-[#080E1F]/90 text-white p-3 rounded-xl z-50 max-w-xs text-xs font-mono overflow-auto max-h-60 border border-[#1A2A4A]">
+            <p className="font-bold mb-1 text-blue-400">🐛 Debug Info</p>
+            <p className="text-gray-400">Ride Status: {rideStatus || 'none'}</p>
+            <p className="text-gray-400">Driver ID: {user?._id?.slice(-6) || 'none'}</p>
+            <p className="text-gray-400">Is At Pickup: {isAtPickup ? '✅' : '❌'}</p>
+            <p className="text-gray-400">Arrival Checked: {arrivalChecked ? '✅' : '❌'}</p>
+            <p className="text-gray-400">Distance: {distanceToPickup !== null ? formatDistance(distanceToPickup) : '--'}</p>
+            <p className="text-gray-400">ETA: {eta !== null ? formatTime(eta) : '--'}</p>
+            <p className="text-gray-400">Speed: {speed > 0 ? `${Math.round(speed)} km/h` : '--'}</p>
+            <p className="text-gray-400">Socket: {socket?.isConnected ? '✅ Connected' : '❌'}</p>
+            <p className="text-gray-400">Ride ID: {currentRide?._id?.slice(-6) || 'none'}</p>
+            <p className="text-gray-400">Distance Traveled: {formatDistance(rideDistanceTraveled)}</p>
+            <p className="text-gray-400">Route Points: {driverRoute.length}</p>
+            <p className="text-gray-400">Deactivated: {user?.isDeactivated ? '❌ YES' : '✅ No'}</p>
+            <p className="text-gray-400">Verified: {user?.isVerified ? '✅' : '❌'}</p>
+            <p className="text-yellow-400 text-[10px] mt-1">Pickup: {currentRide?.pickupLocation?.lat?.toFixed(4)}, {currentRide?.pickupLocation?.lng?.toFixed(4)}</p>
             
             <button 
               onClick={testArrival}
-              className="mt-2 bg-green-600 text-white px-2 py-1 rounded text-xs w-full hover:bg-green-700 transition"
+              className="mt-2 bg-[#1A6BFF] text-white px-2 py-1 rounded text-xs w-full hover:bg-[#5294FF] transition"
             >
               🧪 Test Arrival
             </button>
             <button 
               onClick={requestDriverLocation}
-              className="mt-1 bg-blue-600 text-white px-2 py-1 rounded text-xs w-full hover:bg-blue-700 transition"
+              className="mt-1 bg-[#1A6BFF] text-white px-2 py-1 rounded text-xs w-full hover:bg-[#5294FF] transition"
             >
               📡 Request Location
             </button>
@@ -1652,36 +1728,41 @@ const DriverDashboard = () => {
         )}
 
         {/* ============================================================ */}
-        {/*              MOBILE LAYOUT */}
+        {/*              MOBILE LAYOUT - Dark theme */}
         {/* ============================================================ */}
         {isMobile && (
           <>
-            {/* Mobile Ride Requests Sheet */}
+            {/* Mobile Ride Requests Sheet - Dark theme */}
             {!currentRide && isAvailable && rideRequests.length > 0 && (
-              <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-3 z-30 border-t border-gray-100 safe-area-bottom max-h-64 overflow-y-auto" style={{ marginBottom: '56px' }}>
+              <div className="absolute bottom-0 left-0 right-0 bg-[#0E1A2A] rounded-t-2xl shadow-lg p-3 z-30 border-t border-[#1A2A4A] safe-area-bottom max-h-64 overflow-y-auto" style={{ marginBottom: '56px' }}>
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-sm flex items-center">
-                    <span className="text-yellow-500 mr-2">🔔</span> Ride Requests
-                    <span className="ml-2 bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
+                  <h3 className="font-semibold text-sm text-white flex items-center">
+                    <span className="text-yellow-400 mr-2">🔔</span> Ride Requests
+                    <span className="ml-2 bg-red-500/20 text-red-400 text-xs px-2 py-0.5 rounded-full border border-red-500/20">
                       {rideRequests.length}
                     </span>
                   </h3>
                 </div>
                 {rideRequests.slice(0, 3).map((ride) => (
-                  <div key={ride.rideId} className="p-3 bg-gray-50 rounded-lg mb-2">
+                  <div key={ride.rideId} className="p-3 bg-[#080E1F] rounded-lg mb-2 border border-[#1A2A4A]">
                     <div className="flex justify-between items-center">
                       <div className="flex-1 min-w-0 mr-2">
-                        <p className="text-sm font-medium truncate">Ride #{ride.rideId?.slice(-6) || 'New'}</p>
-                        <p className="text-xs text-gray-500 truncate">{ride.pickup?.address || 'Pickup location'}</p>
-                        <div className="flex items-center gap-2 text-xs text-gray-400">
+                        <div className="flex items-center space-x-1">
+                          <p className="text-sm font-medium text-white truncate">Ride #{ride.rideId?.slice(-6) || 'New'}</p>
+                          {ride.riderVerified && (
+                            <FaCheckCircle className="text-blue-400 text-xs" />
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 truncate">{ride.pickup?.address || 'Pickup location'}</p>
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
                           <span>📍 {ride.distance?.toFixed(1) || '0'}km</span>
-                          <span className="text-green-600 font-bold">R{ride.fare?.toFixed(2) || '0.00'}</span>
+                          <span className="text-green-400 font-bold">R{ride.fare?.toFixed(2) || '0.00'}</span>
                         </div>
                       </div>
                       <button
                         onClick={() => acceptRide(ride.rideId)}
                         disabled={isLoading}
-                        className="px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition whitespace-nowrap flex-shrink-0"
+                        className="px-4 py-2 bg-[#1A6BFF] text-white text-sm font-medium rounded-lg hover:bg-[#5294FF] transition whitespace-nowrap flex-shrink-0"
                       >
                         {isLoading ? '...' : 'Accept'}
                       </button>
@@ -1689,52 +1770,59 @@ const DriverDashboard = () => {
                   </div>
                 ))}
                 {rideRequests.length > 3 && (
-                  <p className="text-center text-xs text-gray-400">+ {rideRequests.length - 3} more requests</p>
+                  <p className="text-center text-xs text-gray-500">+ {rideRequests.length - 3} more requests</p>
                 )}
               </div>
             )}
 
-            {/* Mobile Navigation Info */}
+            {/* Mobile Navigation Info - Dark theme */}
             {currentRide && rideStatus === 'accepted' && !isAtPickup && (
-              <div className="absolute bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm rounded-t-2xl shadow-lg p-4 z-30 border-t border-gray-100 safe-area-bottom" style={{ marginBottom: '56px' }}>
+              <div className="absolute bottom-0 left-0 right-0 bg-[#0E1A2A]/95 backdrop-blur-sm rounded-t-2xl shadow-lg p-4 z-30 border-t border-[#1A2A4A] safe-area-bottom" style={{ marginBottom: '56px' }}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
-                    <div className="bg-blue-100 p-2 rounded-full">
-                      <FaRoute className="text-blue-600 h-5 w-5" />
+                    <div className="bg-[#1A6BFF]/20 p-2 rounded-full">
+                      <FaRoute className="text-[#1A6BFF] h-5 w-5" />
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500">Distance to pickup</p>
-                      <p className="font-bold text-lg">
+                      <p className="text-xs text-gray-400">Distance to pickup</p>
+                      <p className="font-bold text-lg text-white">
                         {distanceToPickup !== null ? formatDistance(distanceToPickup) : '...'}
                       </p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-gray-500">Estimated arrival</p>
-                    <p className="font-bold text-lg text-green-600">
+                    <p className="text-xs text-gray-400">Estimated arrival</p>
+                    <p className="font-bold text-lg text-green-400">
                       {eta !== null ? formatTime(eta) : '--'}
                     </p>
                     {arrivalTime && eta !== null && (
-                      <p className="text-xs text-gray-400">at {arrivalTime}</p>
+                      <p className="text-xs text-gray-500">at {arrivalTime}</p>
                     )}
                   </div>
                 </div>
                 
                 {riderInfo && (
-                  <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="mt-3 p-3 bg-[#080E1F] rounded-lg border border-[#1A2A4A]">
                     <div className="flex items-center space-x-2">
-                      <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
-                        <FaUser className="h-4 w-4 text-gray-600" />
+                      <div className="w-8 h-8 bg-[#1A2A4A] rounded-full flex items-center justify-center">
+                        <FaUser className="h-4 w-4 text-gray-400" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-medium">{riderInfo.name}</p>
-                        <p className="text-xs text-gray-500">
-                          {riderInfo.phone || 'No phone provided'}
-                        </p>
+                        <div className="flex items-center space-x-1">
+                          <p className="text-sm font-medium text-white">{riderInfo.name}</p>
+                          {riderInfo.isVerified && (
+                            <FaCheckCircle className="text-blue-400 text-xs" />
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-2 text-xs text-gray-500">
+                          <span>{riderInfo.phone || 'No phone'}</span>
+                          <span>•</span>
+                          <span className="text-yellow-400">{riderInfo.rating?.average?.toFixed(1) || 'New'} ★</span>
+                        </div>
                       </div>
                       <div className="text-right">
                         <p className="text-xs text-gray-500">Pickup</p>
-                        <p className="text-xs font-medium truncate max-w-[100px]">
+                        <p className="text-xs font-medium text-white truncate max-w-[100px]">
                           {currentRide?.pickupLocation?.address?.split(',')[0] || 'Pickup'}
                         </p>
                       </div>
@@ -1744,13 +1832,13 @@ const DriverDashboard = () => {
                 
                 {distanceToPickup !== null && eta !== null && (
                   <div className="mt-3">
-                    <div className="flex justify-between text-xs text-gray-400 mb-1">
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
                       <span>{formatDistance(distanceToPickup)} remaining</span>
                       <span>~{formatTime(eta)}</span>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-1.5">
+                    <div className="w-full bg-[#1A2A4A] rounded-full h-1.5">
                       <div 
-                        className="bg-blue-600 h-1.5 rounded-full transition-all duration-500"
+                        className="bg-[#1A6BFF] h-1.5 rounded-full transition-all duration-500"
                         style={{ width: `${Math.min(100, (1 - distanceToPickup / 10) * 100)}%` }}
                       ></div>
                     </div>
@@ -1759,29 +1847,34 @@ const DriverDashboard = () => {
               </div>
             )}
 
-            {/* Mobile Ride Status Sheet */}
+            {/* Mobile Ride Status Sheet - Dark theme - ALL BUTTONS PRESERVED */}
             {currentRide && (
-              <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-4 z-30 border-t border-gray-100 safe-area-bottom" style={{ marginBottom: '56px' }}>
+              <div className="absolute bottom-0 left-0 right-0 bg-[#0E1A2A] rounded-t-2xl shadow-lg p-4 z-30 border-t border-[#1A2A4A] safe-area-bottom" style={{ marginBottom: '56px' }}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
                     <div className={`w-2.5 h-2.5 rounded-full ${
-                      rideStatus === 'completed' ? 'bg-green-500' : 
-                      rideStatus === 'in-progress' ? 'bg-blue-500' :
-                      rideStatus === 'arrived' ? 'bg-purple-500' :
-                      'bg-yellow-500'
+                      rideStatus === 'completed' ? 'bg-green-400' : 
+                      rideStatus === 'in-progress' ? 'bg-blue-400' :
+                      rideStatus === 'arrived' ? 'bg-purple-400' :
+                      'bg-yellow-400'
                     } animate-pulse`}></div>
-                    <span className="text-sm font-semibold">{getDriverStatusMessage()}</span>
+                    <span className="text-sm font-semibold text-white">{getDriverStatusMessage()}</span>
                   </div>
-                  <span className="text-lg font-bold text-green-600">R{currentRide?.fare?.toFixed(2)}</span>
+                  <span className="text-lg font-bold text-green-400">R{currentRide?.fare?.toFixed(2)}</span>
                 </div>
                 
                 {riderInfo && (
-                  <div className="flex items-center space-x-2 mt-2 p-2 bg-gray-50 rounded-lg">
-                    <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
-                      <FaUser className="h-4 w-4 text-gray-600" />
+                  <div className="flex items-center space-x-2 mt-2 p-2 bg-[#080E1F] rounded-lg border border-[#1A2A4A]">
+                    <div className="w-8 h-8 bg-[#1A2A4A] rounded-full flex items-center justify-center">
+                      <FaUser className="h-4 w-4 text-gray-400" />
                     </div>
                     <div className="flex-1">
-                      <p className="text-sm font-medium">{riderInfo.name}</p>
+                      <div className="flex items-center space-x-1">
+                        <p className="text-sm font-medium text-white">{riderInfo.name}</p>
+                        {riderInfo.isVerified && (
+                          <FaCheckCircle className="text-blue-400 text-xs" />
+                        )}
+                      </div>
                       <p className="text-xs text-gray-500">
                         {riderInfo.phone || 'No phone provided'}
                       </p>
@@ -1789,75 +1882,80 @@ const DriverDashboard = () => {
                     {distanceToPickup !== null && rideStatus === 'accepted' && !isAtPickup && (
                       <div className="text-right">
                         <p className="text-xs text-gray-500">Distance</p>
-                        <p className="text-sm font-medium">{formatDistance(distanceToPickup)}</p>
+                        <p className="text-sm font-medium text-white">{formatDistance(distanceToPickup)}</p>
                       </div>
                     )}
                     {eta !== null && rideStatus === 'accepted' && !isAtPickup && (
                       <div className="text-right ml-2">
                         <p className="text-xs text-gray-500">ETA</p>
-                        <p className="text-sm font-medium text-green-600">{formatTime(eta)}</p>
+                        <p className="text-sm font-medium text-green-400">{formatTime(eta)}</p>
                       </div>
                     )}
                     {rideStatus === 'in-progress' && (
                       <div className="text-right">
                         <p className="text-xs text-gray-500">Traveled</p>
-                        <p className="text-sm font-medium">{formatDistance(rideDistanceTraveled)}</p>
+                        <p className="text-sm font-medium text-white">{formatDistance(rideDistanceTraveled)}</p>
                       </div>
                     )}
                   </div>
                 )}
                 
+                {/* ALL BUTTONS - PRESERVED */}
                 <div className="flex flex-wrap gap-2 mt-2">
+                  {/* "I'm Here" Button - Heading to pickup */}
                   {rideStatus === 'accepted' && !isAtPickup && (
                     <>
                       <button
                         onClick={manualArrival}
                         disabled={isLoading}
-                        className="flex-1 py-2 bg-orange-500 text-white rounded-lg text-sm hover:bg-orange-600 transition font-medium"
+                        className="flex-1 py-2 bg-orange-500/20 text-orange-400 rounded-lg text-sm hover:bg-orange-500/30 transition font-medium border border-orange-500/20"
                       >
                         📍 I'm Here (Arrived)
                       </button>
                       <button
                         onClick={cancelRide}
                         disabled={isLoading}
-                        className="py-2 px-3 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition"
+                        className="py-2 px-3 bg-red-500/20 text-red-400 rounded-lg text-sm hover:bg-red-500/30 transition border border-red-500/20"
                       >
                         <FaTimes className="h-4 w-4" />
                       </button>
                     </>
                   )}
                   
+                  {/* Arrived - Show Start Ride Button */}
                   {(rideStatus === 'accepted' && isAtPickup) || rideStatus === 'arrived' ? (
                     <>
                       <button
                         onClick={startRide}
                         disabled={isLoading}
-                        className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium"
+                        className="flex-1 py-2 bg-[#1A6BFF] text-white rounded-lg text-sm hover:bg-[#5294FF] transition font-medium"
                       >
                         🚗 Start Ride
                       </button>
                       <button
                         onClick={cancelRide}
                         disabled={isLoading}
-                        className="py-2 px-3 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition"
+                        className="py-2 px-3 bg-red-500/20 text-red-400 rounded-lg text-sm hover:bg-red-500/30 transition border border-red-500/20"
                       >
                         <FaTimes className="h-4 w-4" />
                       </button>
                     </>
                   ) : null}
                   
+                  {/* In Progress - Show Complete Ride with Reason option */}
                   {rideStatus === 'in-progress' && (
                     <>
                       <button
                         onClick={showEarlyCompletion}
                         disabled={isLoading || completingRide}
-                        className="flex-1 py-2 bg-yellow-600 text-white rounded-lg text-sm hover:bg-yellow-700 transition font-medium"
+                        className="flex-1 py-2 bg-yellow-500/20 text-yellow-400 rounded-lg text-sm hover:bg-yellow-500/30 transition font-medium border border-yellow-500/20"
                       >
                         <FaQuestionCircle className="inline mr-1" /> Complete
                       </button>
                     </>
                   )}
                   
+                  {/* Completed - Go Online */}
                   {rideStatus === 'completed' && (
                     <button
                       onClick={() => {
@@ -1889,17 +1987,18 @@ const DriverDashboard = () => {
                           });
                         }
                       }}
-                      className="flex-1 py-2 bg-black text-white rounded-lg text-sm hover:bg-gray-800 transition font-medium"
+                      className="flex-1 py-2 bg-[#1A6BFF] text-white rounded-lg text-sm hover:bg-[#5294FF] transition font-medium"
                     >
                       Go Online
                     </button>
                   )}
                 </div>
 
+                {/* Chat button - mobile */}
                 {rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
                   <button
                     onClick={() => setIsChatOpen(true)}
-                    className="w-full mt-2 py-2 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200 transition flex items-center justify-center relative"
+                    className="w-full mt-2 py-2 bg-blue-500/20 text-blue-400 rounded-lg text-sm hover:bg-blue-500/30 transition flex items-center justify-center relative border border-blue-500/20"
                   >
                     <FaComment className="mr-2" /> Chat with {riderInfo?.name || 'Rider'}
                     {unreadMessages > 0 && (
@@ -1912,37 +2011,42 @@ const DriverDashboard = () => {
               </div>
             )}
 
-            {/* Mobile Bottom Navigation */}
-            <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-bottom">
+            {/* Mobile Bottom Navigation - Dark theme */}
+            <div className="fixed bottom-0 left-0 right-0 bg-[#080E1F] border-t border-[#1A2A4A] z-50 safe-area-bottom">
               <div className="flex items-center justify-around h-14 max-w-screen-lg mx-auto px-4">
                 <button
                   onClick={() => navigate('/driver')}
-                  className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors"
+                  className="flex flex-col items-center justify-center text-gray-500 hover:text-white transition-colors"
                 >
                   <FaHome className="h-5 w-5" />
-                  <span className="text-[9px] mt-0.5 text-gray-400">Home</span>
+                  <span className="text-[9px] mt-0.5 text-gray-500">Home</span>
                 </button>
                 <button
                   onClick={() => navigate('/history')}
-                  className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors"
+                  className="flex flex-col items-center justify-center text-gray-500 hover:text-white transition-colors"
                 >
                   <FaHistory className="h-5 w-5" />
-                  <span className="text-[9px] mt-0.5 text-gray-400">History</span>
+                  <span className="text-[9px] mt-0.5 text-gray-500">History</span>
                 </button>
                 <button
                   onClick={toggleAvailability}
-                  disabled={isLoading}
-                  className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors disabled:opacity-50"
+                  disabled={isLoading || user?.isDeactivated}
+                  className="flex flex-col items-center justify-center text-gray-500 hover:text-white transition-colors disabled:opacity-50"
                 >
-                  {isAvailable ? (
+                  {user?.isDeactivated ? (
                     <>
-                      <div className="h-3 w-3 rounded-full bg-green-500"></div>
-                      <span className="text-[9px] mt-0.5 text-green-500 font-medium">Online</span>
+                      <div className="h-3 w-3 rounded-full bg-red-500"></div>
+                      <span className="text-[9px] mt-0.5 text-red-400 font-medium">Deactivated</span>
+                    </>
+                  ) : isAvailable ? (
+                    <>
+                      <div className="h-3 w-3 rounded-full bg-green-400"></div>
+                      <span className="text-[9px] mt-0.5 text-green-400 font-medium">Online</span>
                     </>
                   ) : (
                     <>
-                      <div className="h-3 w-3 rounded-full bg-gray-300"></div>
-                      <span className="text-[9px] mt-0.5 text-gray-400">Offline</span>
+                      <div className="h-3 w-3 rounded-full bg-gray-600"></div>
+                      <span className="text-[9px] mt-0.5 text-gray-500">Offline</span>
                     </>
                   )}
                 </button>
@@ -1952,115 +2056,128 @@ const DriverDashboard = () => {
         )}
 
         {/* ============================================================ */}
-        {/*              DESKTOP LAYOUT */}
+        {/*              DESKTOP LAYOUT - Dark theme - ALL BUTTONS PRESERVED */}
         {/* ============================================================ */}
         {!isMobile && (
-          <div className="absolute top-0 right-0 h-full w-96 bg-white border-l shadow-lg overflow-y-auto z-20">
+          <div className="absolute top-0 right-0 h-full w-96 bg-[#080E1F] border-l border-[#1A2A4A] shadow-lg overflow-y-auto z-20">
             <div className="p-6 pb-20">
-              <h2 className="text-xl font-bold mb-6 flex items-center">
-                <FaCar className="mr-2" /> Driver Dashboard
+              <h2 className="text-xl font-bold mb-6 flex items-center text-white">
+                <FaCar className="mr-2 text-[#1A6BFF]" /> Driver Dashboard
+                {user?.isVerified && (
+                  <span className="ml-2 text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full flex items-center border border-blue-500/20">
+                    <FaCheckCircle className="mr-1 text-xs" /> Verified
+                  </span>
+                )}
               </h2>
               
               {/* Stats */}
               <div className="grid grid-cols-2 gap-3 mb-6">
-                <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <FaMoneyBill className="h-5 w-5 text-green-600 mx-auto mb-1" />
-                  <p className="text-sm text-gray-500">Earnings</p>
-                  <p className="text-xl font-bold">R{earnings.toFixed(2)}</p>
+                <div className="bg-[#0E1A2A] rounded-lg p-3 text-center border border-[#1A2A4A]">
+                  <FaMoneyBill className="h-5 w-5 text-green-400 mx-auto mb-1" />
+                  <p className="text-sm text-gray-400">Earnings</p>
+                  <p className="text-xl font-bold text-white">R{earnings.toFixed(2)}</p>
                 </div>
-                <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <FaCar className="h-5 w-5 text-blue-600 mx-auto mb-1" />
-                  <p className="text-sm text-gray-500">Completed</p>
-                  <p className="text-xl font-bold">{completedRides}</p>
+                <div className="bg-[#0E1A2A] rounded-lg p-3 text-center border border-[#1A2A4A]">
+                  <FaCar className="h-5 w-5 text-blue-400 mx-auto mb-1" />
+                  <p className="text-sm text-gray-400">Completed</p>
+                  <p className="text-xl font-bold text-white">{completedRides}</p>
                 </div>
-                <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <FaClock className="h-5 w-5 text-orange-600 mx-auto mb-1" />
-                  <p className="text-sm text-gray-500">Distance</p>
-                  <p className="text-xl font-bold">{totalDistance.toFixed(1)} km</p>
+                <div className="bg-[#0E1A2A] rounded-lg p-3 text-center border border-[#1A2A4A]">
+                  <FaClock className="h-5 w-5 text-orange-400 mx-auto mb-1" />
+                  <p className="text-sm text-gray-400">Distance</p>
+                  <p className="text-xl font-bold text-white">{totalDistance.toFixed(1)} km</p>
                 </div>
-                <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <FaClock className="h-5 w-5 text-purple-600 mx-auto mb-1" />
-                  <p className="text-sm text-gray-500">Avg Fare</p>
-                  <p className="text-xl font-bold">
-                    {completedRides > 0 ? `R${(earnings / completedRides).toFixed(2)}` : 'R0.00'}
-                  </p>
+                <div className="bg-[#0E1A2A] rounded-lg p-3 text-center border border-[#1A2A4A]">
+                  <FaStar className="h-5 w-5 text-yellow-400 mx-auto mb-1" />
+                  <p className="text-sm text-gray-400">Rating</p>
+                  <p className="text-xl font-bold text-white">{getRatingDisplay()}</p>
                 </div>
               </div>
 
-              {/* Toggle Online/Offline */}
-              <div className="flex items-center justify-between p-4 bg-gray-100 rounded-lg mb-6">
+              {/* Toggle Online/Offline - Dark theme */}
+              <div className="flex items-center justify-between p-4 bg-[#0E1A2A] rounded-lg mb-6 border border-[#1A2A4A]">
                 <div className="flex items-center">
-                  <div className={`w-3 h-3 rounded-full ${isAvailable ? 'bg-green-500' : 'bg-red-500'} mr-3`}></div>
+                  <div className={`w-3 h-3 rounded-full ${user?.isDeactivated ? 'bg-red-500' : isAvailable ? 'bg-green-400' : 'bg-red-500'} mr-3`}></div>
                   <div>
-                    <p className="font-medium">{isAvailable ? 'Online' : 'Offline'}</p>
-                    <p className="text-xs text-gray-500">
-                      {isAvailable ? 'Ready to accept rides' : 'Tap to go online'}
+                    <p className="font-medium text-white">
+                      {user?.isDeactivated ? 'Deactivated' : isAvailable ? 'Online' : 'Offline'}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {user?.isDeactivated ? 'Account deactivated. Contact support.' : isAvailable ? 'Ready to accept rides' : 'Tap to go online'}
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={toggleAvailability}
-                  disabled={isLoading || isGettingLocation}
-                  className={`px-4 py-2 rounded-lg font-medium transition ${
-                    isAvailable
-                      ? 'bg-red-600 text-white hover:bg-red-700'
-                      : 'bg-green-600 text-white hover:bg-green-700'
-                  } disabled:opacity-50`}
+                  disabled={isLoading || isGettingLocation || user?.isDeactivated}
+                  className={`px-4 py-2 rounded-lg font-medium transition disabled:opacity-50 ${
+                    user?.isDeactivated ? 'bg-gray-600 text-white cursor-not-allowed' :
+                    isAvailable ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20' :
+                    'bg-[#1A6BFF] text-white hover:bg-[#5294FF]'
+                  }`}
                 >
-                  {isLoading ? '...' : isAvailable ? 'Go Offline' : 'Go Online'}
+                  {isLoading ? '...' : 
+                   user?.isDeactivated ? 'Deactivated' :
+                   isAvailable ? 'Go Offline' : 'Go Online'}
                 </button>
               </div>
 
-              {/* Vehicle Info */}
+              {/* Vehicle Info - Dark theme */}
               {user?.vehicle && (
-                <div className="bg-gray-50 rounded-lg p-4 mb-6">
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Your Vehicle</h3>
-                  <div className="space-y-1 text-sm">
+                <div className="bg-[#0E1A2A] rounded-lg p-4 mb-6 border border-[#1A2A4A]">
+                  <h3 className="text-sm font-medium text-gray-300 mb-2">Your Vehicle</h3>
+                  <div className="space-y-1 text-sm text-gray-400">
                     <p><span className="text-gray-500">Model:</span> {user.vehicle.model}</p>
                     <p><span className="text-gray-500">Color:</span> {user.vehicle.color}</p>
                     <p><span className="text-gray-500">Plate:</span> {user.vehicle.plateNumber}</p>
+                    <p><span className="text-gray-500">Seats:</span> {user.vehicle.seats || 4}</p>
                   </div>
                 </div>
               )}
 
-              {/* Ride Requests (Desktop) */}
+              {/* Ride Requests - Dark theme */}
               {!currentRide && isAvailable && (
                 <div className="space-y-4">
-                  <h3 className="font-semibold text-lg flex items-center">
-                    <span className="text-yellow-500 mr-2">🔔</span> Ride Requests
-                    <span className="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full">
+                  <h3 className="font-semibold text-lg text-white flex items-center">
+                    <span className="text-yellow-400 mr-2">🔔</span> Ride Requests
+                    <span className="ml-2 bg-red-500/20 text-red-400 text-xs px-2 py-0.5 rounded-full border border-red-500/20">
                       {rideRequests.length}
                     </span>
                   </h3>
                   
                   {rideRequests.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-200 rounded-lg">
+                    <div className="text-center py-8 text-gray-400 border-2 border-dashed border-[#1A2A4A] rounded-lg">
                       <div className="text-4xl mb-2">🚗</div>
                       <p className="text-lg">No ride requests yet</p>
                       <p className="text-sm">Waiting for riders in your area</p>
                     </div>
                   ) : (
                     rideRequests.map((ride) => (
-                      <div key={ride.rideId} className="p-4 border border-gray-200 rounded-lg hover:shadow-md transition bg-white">
+                      <div key={ride.rideId} className="p-4 border border-[#1A2A4A] rounded-lg hover:border-[#1A6BFF] transition bg-[#0E1A2A]">
                         <div className="flex justify-between mb-2">
-                          <span className="font-medium">Ride #{ride.rideId?.slice(-6) || 'New'}</span>
-                          <span className="text-green-600 font-bold">R{ride.fare?.toFixed(2) || '0.00'}</span>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-medium text-white">Ride #{ride.rideId?.slice(-6) || 'New'}</span>
+                            {ride.riderVerified && (
+                              <FaCheckCircle className="text-blue-400 text-xs" />
+                            )}
+                          </div>
+                          <span className="text-green-400 font-bold">R{ride.fare?.toFixed(2) || '0.00'}</span>
                         </div>
-                        <div className="text-sm text-gray-600 space-y-1">
+                        <div className="text-sm text-gray-400 space-y-1">
                           <div className="flex items-start">
-                            <FaMapMarkerAlt className="text-green-500 mr-1 mt-0.5 flex-shrink-0" />
+                            <FaMapMarkerAlt className="text-green-400 mr-1 mt-0.5 flex-shrink-0" />
                             <p className="truncate">{ride.pickup?.address || 'Pickup location'}</p>
                           </div>
                           <div className="flex items-start">
-                            <FaFlag className="text-red-500 mr-1 mt-0.5 flex-shrink-0" />
+                            <FaFlag className="text-red-400 mr-1 mt-0.5 flex-shrink-0" />
                             <p className="truncate">{ride.dropoff?.address || 'Destination'}</p>
                           </div>
-                          <p className="text-xs text-gray-400">📍 {ride.distance?.toFixed(1) || '0'} km away</p>
+                          <p className="text-xs text-gray-500">📍 {ride.distance?.toFixed(1) || '0'} km away</p>
                         </div>
                         <button
                           onClick={() => acceptRide(ride.rideId)}
                           disabled={isLoading}
-                          className="mt-3 w-full py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition disabled:opacity-50"
+                          className="mt-3 w-full py-2 bg-[#1A6BFF] text-white rounded-lg hover:bg-[#5294FF] transition disabled:opacity-50"
                         >
                           Accept Ride
                         </button>
@@ -2070,53 +2187,69 @@ const DriverDashboard = () => {
                 </div>
               )}
 
-              {/* Offline State */}
+              {/* Offline State - Dark theme */}
               {!currentRide && !isAvailable && (
-                <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-200 rounded-lg">
+                <div className="text-center py-8 text-gray-400 border-2 border-dashed border-[#1A2A4A] rounded-lg">
                   <div className="text-4xl mb-2">⏰</div>
                   <p className="text-lg">You're offline</p>
                   <p className="text-sm">Go online to start receiving ride requests</p>
                 </div>
               )}
 
-              {/* Active Ride Info - Desktop */}
+              {/* Active Ride Info - Desktop - ALL BUTTONS PRESERVED */}
               {currentRide && (
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="font-semibold mb-3">Active Ride</h3>
+                <div className="bg-[#0E1A2A] rounded-lg p-4 border border-[#1A2A4A]">
+                  <h3 className="font-semibold text-white mb-3">Active Ride</h3>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Status</span>
-                      <span className="font-medium">{getDriverStatusMessage()}</span>
+                      <span className="text-gray-400">Status</span>
+                      <span className="font-medium text-white">{getDriverStatusMessage()}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Fare</span>
-                      <span className="font-bold text-green-600">R{currentRide.fare?.toFixed(2)}</span>
+                      <span className="text-gray-400">Fare</span>
+                      <span className="font-bold text-green-400">R{currentRide.fare?.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Distance</span>
-                      <span className="font-medium">{currentRide.distance?.toFixed(1) || '0'} km</span>
+                      <span className="text-gray-400">Distance</span>
+                      <span className="font-medium text-white">{currentRide.distance?.toFixed(1) || '0'} km</span>
                     </div>
                     
                     {currentRide?.tripReference && (
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Trip Reference</span>
-                        <span className="font-mono font-medium text-xs bg-gray-100 px-2 py-0.5 rounded">
+                        <span className="text-gray-400">Trip Reference</span>
+                        <span className="font-mono font-medium text-xs text-white bg-[#1A2A4A] px-2 py-0.5 rounded border border-[#1A2A4A]">
                           {currentRide.tripReference}
                         </span>
                       </div>
                     )}
                     
                     {riderInfo && (
-                      <div className="pt-2 border-t">
-                        <p className="text-xs font-medium text-gray-700 mb-2 flex items-center">
+                      <div className="pt-2 border-t border-[#1A2A4A]">
+                        <p className="text-xs font-medium text-gray-400 mb-2 flex items-center">
                           <FaUserFriends className="mr-1" /> Rider Information
+                          {riderInfo.isVerified && (
+                            <FaCheckCircle className="ml-1 text-blue-400 text-xs" />
+                          )}
                         </p>
-                        <div className="p-3 bg-gray-100 rounded-lg">
-                          <p className="text-sm font-medium">{riderInfo.name}</p>
-                          <p className="text-xs text-gray-500">{riderInfo.phone || 'No phone provided'}</p>
+                        <div className="p-3 bg-[#080E1F] rounded-lg border border-[#1A2A4A]">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-white">{riderInfo.name}</p>
+                              <p className="text-xs text-gray-400">{riderInfo.phone || 'No phone provided'}</p>
+                              <p className="text-xs text-yellow-400 flex items-center mt-0.5">
+                                <FaStar className="text-xs mr-1" />
+                                {riderInfo.rating?.average?.toFixed(1) || 'New'} ({riderInfo.rating?.count || 0} reviews)
+                              </p>
+                            </div>
+                            {riderInfo.isVerified && (
+                              <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full flex items-center border border-blue-500/20">
+                                <FaCheckCircle className="mr-1 text-xs" /> Verified
+                              </span>
+                            )}
+                          </div>
                           {currentRide?.pickupLocation?.address && (
-                            <p className="text-xs text-gray-500 mt-1">
-                              <FaMapMarkerAlt className="inline mr-1 text-green-500" />
+                            <p className="text-xs text-gray-400 mt-1">
+                              <FaMapMarkerAlt className="inline mr-1 text-green-400" />
                               {currentRide.pickupLocation.address}
                             </p>
                           )}
@@ -2127,26 +2260,26 @@ const DriverDashboard = () => {
                     {distanceToPickup !== null && rideStatus === 'accepted' && !isAtPickup && (
                       <>
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Distance to pickup</span>
-                          <span className="font-medium">{formatDistance(distanceToPickup)}</span>
+                          <span className="text-gray-400">Distance to pickup</span>
+                          <span className="font-medium text-white">{formatDistance(distanceToPickup)}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-600">ETA</span>
-                          <span className="font-medium text-green-600">
+                          <span className="text-gray-400">ETA</span>
+                          <span className="font-medium text-green-400">
                             {eta !== null ? formatTime(eta) : '--'}
                             {arrivalTime && eta !== null && (
-                              <span className="text-xs text-gray-400 ml-1">(at {arrivalTime})</span>
+                              <span className="text-xs text-gray-500 ml-1">(at {arrivalTime})</span>
                             )}
                           </span>
                         </div>
                         <div className="mt-2">
-                          <div className="flex justify-between text-xs text-gray-400 mb-1">
+                          <div className="flex justify-between text-xs text-gray-500 mb-1">
                             <span>{formatDistance(distanceToPickup)} remaining</span>
                             <span>~{formatTime(eta)}</span>
                           </div>
-                          <div className="w-full bg-gray-200 rounded-full h-1.5">
+                          <div className="w-full bg-[#1A2A4A] rounded-full h-1.5">
                             <div 
-                              className="bg-blue-600 h-1.5 rounded-full transition-all duration-500"
+                              className="bg-[#1A6BFF] h-1.5 rounded-full transition-all duration-500"
                               style={{ width: `${Math.min(100, (1 - distanceToPickup / 10) * 100)}%` }}
                             ></div>
                           </div>
@@ -2157,71 +2290,77 @@ const DriverDashboard = () => {
                     {rideStatus === 'in-progress' && (
                       <>
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Distance Traveled</span>
-                          <span className="font-medium">{formatDistance(rideDistanceTraveled)}</span>
+                          <span className="text-gray-400">Distance Traveled</span>
+                          <span className="font-medium text-white">{formatDistance(rideDistanceTraveled)}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Status</span>
-                          <span className="font-medium text-blue-600">🚗 Ride in progress</span>
+                          <span className="text-gray-400">Status</span>
+                          <span className="font-medium text-blue-400">🚗 Ride in progress</span>
                         </div>
                       </>
                     )}
                     
                     {isAtPickup && (
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Status</span>
-                        <span className="font-medium text-green-600">📍 Arrived!</span>
+                        <span className="text-gray-400">Status</span>
+                        <span className="font-medium text-green-400">📍 Arrived!</span>
                       </div>
                     )}
                     
                     {speed > 0 && rideStatus === 'accepted' && (
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Current Speed</span>
-                        <span className="font-medium">{Math.round(speed)} km/h</span>
+                        <span className="text-gray-400">Current Speed</span>
+                        <span className="font-medium text-white">{Math.round(speed)} km/h</span>
                       </div>
                     )}
                     
+                    {/* Desktop Buttons - ALL PRESERVED */}
+                    
+                    {/* I'm Here (Arrived) Button - Heading to pickup */}
                     {rideStatus === 'accepted' && !isAtPickup && (
-                      <div className="pt-2 border-t mt-2">
+                      <div className="pt-2 border-t border-[#1A2A4A] mt-2">
                         <button
                           onClick={manualArrival}
                           disabled={isLoading}
-                          className="w-full py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition font-medium"
+                          className="w-full py-2 bg-orange-500/20 text-orange-400 rounded-lg hover:bg-orange-500/30 transition font-medium border border-orange-500/20"
                         >
                           📍 I'm Here (Arrived)
                         </button>
                       </div>
                     )}
                     
+                    {/* Start Ride Button */}
                     {(rideStatus === 'accepted' && isAtPickup) || rideStatus === 'arrived' ? (
-                      <div className="pt-2 border-t mt-2">
+                      <div className="pt-2 border-t border-[#1A2A4A] mt-2">
                         <button
                           onClick={startRide}
                           disabled={isLoading}
-                          className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
+                          className="w-full py-2 bg-[#1A6BFF] text-white rounded-lg hover:bg-[#5294FF] transition font-medium"
                         >
                           🚗 Start Ride
                         </button>
                       </div>
                     ) : null}
                     
+                    {/* Complete Ride Button (with reason) - Only in progress */}
                     {rideStatus === 'in-progress' && (
-                      <div className="pt-2 border-t mt-2">
+                      <div className="pt-2 border-t border-[#1A2A4A] mt-2">
                         <button
                           onClick={showEarlyCompletion}
                           disabled={isLoading || completingRide}
-                          className="w-full py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition font-medium flex items-center justify-center"
+                          className="w-full py-2 bg-yellow-500/20 text-yellow-400 rounded-lg hover:bg-yellow-500/30 transition font-medium flex items-center justify-center border border-yellow-500/20"
                         >
                           <FaQuestionCircle className="mr-2" /> Complete Ride
                         </button>
                       </div>
                     )}
                     
+                    {/* Chat Button */}
                     {rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
-                      <div className="pt-2 border-t mt-2">
+                      <div className="pt-2 border-t border-[#1A2A4A] mt-2">
                         <button
                           onClick={() => setIsChatOpen(true)}
-                          className="w-full py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition flex items-center justify-center relative"
+                          className="w-full py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition flex items-center justify-center relative border border-blue-500/20"
                         >
                           <FaComment className="mr-2" /> Chat with {riderInfo?.name || 'Rider'}
                           {unreadMessages > 0 && (
@@ -2233,20 +2372,22 @@ const DriverDashboard = () => {
                       </div>
                     )}
                     
+                    {/* Cancel Ride Button - Only for accepted/arrived */}
                     {(rideStatus === 'accepted' || rideStatus === 'arrived') && (
-                      <div className="pt-2 border-t mt-2">
+                      <div className="pt-2 border-t border-[#1A2A4A] mt-2">
                         <button
                           onClick={cancelRide}
                           disabled={isLoading}
-                          className="w-full py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:opacity-50 flex items-center justify-center"
+                          className="w-full py-2 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 transition disabled:opacity-50 flex items-center justify-center border border-red-500/20"
                         >
                           <FaTimes className="mr-2" /> Cancel Ride
                         </button>
                       </div>
                     )}
                     
+                    {/* No cancel for in-progress - show message */}
                     {rideStatus === 'in-progress' && (
-                      <div className="pt-2 border-t mt-2">
+                      <div className="pt-2 border-t border-[#1A2A4A] mt-2">
                         <p className="text-center text-xs text-gray-500">
                           ⚠️ Cannot cancel ride while in progress. Use "Complete Ride" instead.
                         </p>
@@ -2260,15 +2401,15 @@ const DriverDashboard = () => {
         )}
       </div>
 
-      {/* ============ EARLY COMPLETION MODAL ============ */}
+      {/* Early Completion Modal - Dark theme */}
       {showEarlyCompletionModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold mb-4 flex items-center">
-              <FaQuestionCircle className="text-yellow-600 mr-2" />
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-[#0E1A2A] rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto border border-[#1A2A4A]">
+            <h3 className="text-xl font-bold mb-4 flex items-center text-white">
+              <FaQuestionCircle className="text-yellow-400 mr-2" />
               Complete Ride Early
             </h3>
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-gray-400 mb-4">
               Please select a reason for completing this ride before reaching the destination.
             </p>
             
@@ -2279,8 +2420,8 @@ const DriverDashboard = () => {
                   onClick={() => setEarlyCompletionReason(reason.id)}
                   className={`w-full p-3 rounded-lg border-2 text-left transition ${
                     earlyCompletionReason === reason.id
-                      ? 'border-yellow-500 bg-yellow-50'
-                      : 'border-gray-200 hover:border-gray-400'
+                      ? 'border-yellow-500/50 bg-yellow-500/10 text-white'
+                      : 'border-[#1A2A4A] text-gray-400 hover:border-[#1A6BFF] hover:text-white'
                   }`}
                 >
                   <span className="font-medium">{reason.label}</span>
@@ -2289,14 +2430,14 @@ const DriverDashboard = () => {
             </div>
             
             <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-300 mb-1">
                 Additional Notes (Optional)
               </label>
               <textarea
                 value={earlyCompletionNote}
                 onChange={(e) => setEarlyCompletionNote(e.target.value)}
                 placeholder="Add any additional details..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                className="w-full px-3 py-2 bg-[#080E1F] border border-[#1A2A4A] rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500/50 text-white placeholder-gray-500 resize-none"
                 rows="3"
               />
             </div>
@@ -2305,7 +2446,7 @@ const DriverDashboard = () => {
               <button
                 onClick={completeRideWithReason}
                 disabled={!earlyCompletionReason || completingRide}
-                className="flex-1 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition disabled:opacity-50 font-medium"
+                className="flex-1 py-2 bg-yellow-500/20 text-yellow-400 rounded-lg hover:bg-yellow-500/30 transition disabled:opacity-50 font-medium border border-yellow-500/20"
               >
                 {completingRide ? (
                   <FaSpinner className="animate-spin mx-auto h-5 w-5" />
@@ -2319,7 +2460,7 @@ const DriverDashboard = () => {
                   setEarlyCompletionReason('');
                   setEarlyCompletionNote('');
                 }}
-                className="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
+                className="px-4 py-2 bg-[#1A2A4A] text-gray-300 rounded-lg hover:bg-[#2A3A5A] transition"
               >
                 Cancel
               </button>
@@ -2359,12 +2500,31 @@ const DriverDashboard = () => {
           padding-bottom: env(safe-area-inset-bottom);
         }
         .car-marker {
-          filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.3));
+          filter: drop-shadow(0 4px 6px rgba(26, 107, 255, 0.3));
         }
-        @media (max-width: 767px) {
-          .leaflet-control-container {
-            margin-bottom: 56px;
-          }
+        .driver-available-marker {
+          filter: drop-shadow(0 2px 4px rgba(26, 107, 255, 0.3));
+          animation: driverPulse 2s ease-in-out infinite;
+          cursor: pointer;
+        }
+        .driver-available-marker:hover {
+          animation: none;
+          transform: scale(1.2);
+        }
+        @keyframes driverPulse {
+          0% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.1); opacity: 0.8; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .overflow-y-auto::-webkit-scrollbar {
+          width: 4px;
+        }
+        .overflow-y-auto::-webkit-scrollbar-track {
+          background: #0E1A2A;
+        }
+        .overflow-y-auto::-webkit-scrollbar-thumb {
+          background: #1A6BFF;
+          border-radius: 4px;
         }
       `}</style>
     </div>

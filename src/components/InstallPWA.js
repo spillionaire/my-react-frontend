@@ -22,14 +22,14 @@ const InstallPWA = ({ isVisible, onInstall, onDismiss }) => {
   if (!isVisible) return null;
 
   return (
-    <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:max-w-sm bg-white rounded-xl shadow-2xl p-4 border border-gray-200 z-50 animate-slide-up">
+    <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:max-w-sm bg-[#0E1A2A] rounded-xl shadow-2xl p-4 border border-[#1A2A4A] z-50 animate-slide-up">
       <div className="flex items-start">
         <div className="flex-1">
           <div className="flex items-center space-x-2">
             <span className="text-2xl">🚗</span>
-            <h4 className="font-bold text-black">Install Vai</h4>
+            <h4 className="font-bold text-white">Install Vai</h4>
           </div>
-          <p className="text-sm text-gray-600 mt-1">
+          <p className="text-sm text-gray-400 mt-1">
             {isIOS 
               ? 'Tap the Share button and select "Add to Home Screen"' 
               : 'Get the app for faster rides and offline access'}
@@ -38,20 +38,20 @@ const InstallPWA = ({ isVisible, onInstall, onDismiss }) => {
           <div className="flex items-center space-x-2 mt-3">
             {isIOS ? (
               <div className="text-xs text-gray-500 flex items-center">
-                <span className="bg-gray-100 px-2 py-1 rounded mr-1">⬆️</span>
+                <span className="bg-[#1A2A4A] px-2 py-1 rounded mr-1 text-white">⬆️</span>
                 Tap Share → Add to Home Screen
               </div>
             ) : (
               <>
                 <button
                   onClick={onInstall}
-                  className="bg-black text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 transition flex items-center"
+                  className="bg-[#1A6BFF] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#5294FF] transition flex items-center shadow-lg shadow-[#1A6BFF]/30"
                 >
                   <FaDownload className="mr-2" /> Install
                 </button>
                 <button
                   onClick={onDismiss}
-                  className="text-gray-500 text-sm hover:text-gray-700"
+                  className="text-gray-500 text-sm hover:text-white transition"
                 >
                   Not now
                 </button>
@@ -62,7 +62,7 @@ const InstallPWA = ({ isVisible, onInstall, onDismiss }) => {
           {isIOS && (
             <button
               onClick={onDismiss}
-              className="text-gray-400 text-xs hover:text-gray-600 mt-2"
+              className="text-gray-500 text-xs hover:text-white transition mt-2"
             >
               Dismiss
             </button>
@@ -71,7 +71,7 @@ const InstallPWA = ({ isVisible, onInstall, onDismiss }) => {
         {!isIOS && (
           <button
             onClick={onDismiss}
-            className="text-gray-400 hover:text-gray-600"
+            className="text-gray-500 hover:text-white transition"
           >
             <FaTimes />
           </button>

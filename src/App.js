@@ -16,6 +16,12 @@ import DriverDashboard from './pages/DriverDashboard';
 import RideHistory from './pages/RideHistory';
 import InstallPWA from './components/InstallPWA';
 import PWAUpdate from './components/PWAUpdate';
+import HelpPage from './pages/HelpPage';
+import SafetyCentre from './pages/SafetyCentre';
+import LegalPage from './pages/LegalPage';
+import SupportPage from './pages/SupportPage';
+import ReportPage from './pages/ReportPage';
+import PaymentMethods from './pages/PaymentMethods';
 import { API_URL } from './config';
 import './App.css';
 
@@ -120,12 +126,20 @@ function App() {
               <Route path="/reset-password/:token" element={<ResetPassword />} />
               <Route path="/" element={<Navigate to="/login" />} />
               
+              {/* Public Info Pages */}
+              <Route path="/help" element={<HelpPage />} />
+              <Route path="/safety" element={<SafetyCentre />} />
+              <Route path="/legal" element={<LegalPage />} />
+              
               {/* Protected Routes */}
               <Route element={<PrivateRoute />}>
                 <Route path="/rider" element={<RiderDashboard />} />
                 <Route path="/driver" element={<DriverDashboard />} />
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/history" element={<RideHistory />} />
+                <Route path="/support" element={<SupportPage />} />
+                <Route path="/report" element={<ReportPage />} />
+                <Route path="/payment-methods" element={<PaymentMethods />} />
               </Route>
             </Routes>
             

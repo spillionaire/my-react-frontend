@@ -1,264 +1,324 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FaTimes, FaPaperPlane, FaUser, FaCar } from 'react-icons/fa';
-import { useSocket } from '../context/SocketContext';
 import { useAuth } from '../context/AuthContext';
+import { useSocket } from '../context/SocketContext';
+import { FaTimes, FaPaperPlane, FaUser, FaCar } from 'react-icons/fa';
+import axios from 'axios';
 import toast from 'react-hot-toast';
+import { API_URL } from '../config';
 
 const Chat = ({ rideId, driverInfo, riderInfo, isOpen, onClose }) => {
   const { user } = useAuth();
   const socket = useSocket();
   const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState('');
-  const [isJoined, setIsJoined] = useState(false);
+  const [message, setMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
-  const notificationSoundRef = useRef(null);
+  const hasJoinedRef = useRef(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  // Create notification sound
-  useEffect(() => {
-    notificationSoundRef.current = new Audio(
-      'data:audio/wav;base64,UklGRlQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoAAACBhYqFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYaFhYY='
-    );
-    return () => {
-      if (notificationSoundRef.current) {
-        notificationSoundRef.current = null;
-      }
-    };
-  }, []);
-
-  // Play notification sound
-  const playNotification = () => {
+  // Fetch chat history from backend
+  const fetchChatHistory = async () => {
     try {
-      if (notificationSoundRef.current) {
-        notificationSoundRef.current.play().catch(() => {});
+      setIsLoading(true);
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_URL}/api/rides/${rideId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.data && response.data.chatMessages) {
+        setMessages(response.data.chatMessages);
+        // Mark messages as read
+        const unread = response.data.chatMessages.filter(
+          msg => msg.senderId !== user?._id && !msg.isRead
+        );
+        if (unread.length > 0) {
+          await markMessagesAsRead(unread.map(m => m._id));
+        }
       }
-    } catch (e) {
-      // Silent fail
+    } catch (error) {
+      console.error('Error fetching chat history:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Scroll to bottom of messages
+  // Mark messages as read
+  const markMessagesAsRead = async (messageIds) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `${API_URL}/api/rides/${rideId}/chat/mark-read`,
+        { messageIds },
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+    } catch (error) {
+      console.error('Error marking messages as read:', error);
+    }
+  };
+
+  // Join chat room
+  const joinChatRoom = () => {
+    if (socket && rideId && !hasJoinedRef.current) {
+      socket.emit('join-ride-chat', { rideId });
+      hasJoinedRef.current = true;
+      console.log('📱 Joined chat room:', rideId);
+    }
+  };
+
+  // Load messages when chat opens
+  useEffect(() => {
+    if (isOpen && rideId) {
+      fetchChatHistory();
+      joinChatRoom();
+    }
+    
+    return () => {
+      if (socket && rideId && hasJoinedRef.current) {
+        socket.emit('leave-ride-chat', { rideId });
+        hasJoinedRef.current = false;
+      }
+    };
+  }, [isOpen, rideId]);
+
+  // Socket listener for new messages
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewMessage = (msg) => {
+      // Only add message if it belongs to this ride
+      if (msg.rideId === rideId) {
+        console.log('📩 New message received:', msg);
+        
+        // Add to messages state
+        setMessages(prev => {
+          // Check if message already exists (avoid duplicates)
+          const exists = prev.some(m => 
+            m._id === msg._id || 
+            (m.message === msg.message && 
+             m.senderId === msg.senderId && 
+             m.timestamp === msg.timestamp)
+          );
+          if (exists) return prev;
+          return [...prev, msg];
+        });
+        
+        // If message is from other user, increment unread count
+        if (msg.senderId !== user?._id) {
+          setUnreadCount(prev => prev + 1);
+        }
+        
+        // Scroll to bottom
+        setTimeout(() => {
+          scrollToBottom();
+        }, 100);
+      }
+    };
+
+    socket.on('new-message', handleNewMessage);
+
+    return () => {
+      socket.off('new-message', handleNewMessage);
+    };
+  }, [socket, rideId, user]);
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
-  // Load chat history and join room
-  useEffect(() => {
-    if (!socket || !rideId || !isOpen) return;
+  // Send message - FIXED to save to database
+  const sendMessage = async () => {
+    if (!message.trim() || !rideId) return;
 
-    // Join chat room
-    socket.emit('join-ride-chat', { rideId });
-
-    // Listen for join confirmation
-    socket.on('chat-joined', (data) => {
-      console.log('✅ Joined chat room:', data.rideId);
-      setIsJoined(true);
-      socket.emit('get-chat-history', { rideId });
-    });
-
-    // Listen for new messages
-    socket.on('new-message', (msg) => {
-      console.log('📩 New message received:', msg);
-      console.log('Current user ID:', user?.id);
-      console.log('Message sender ID:', msg.senderId);
-      
-      // CRITICAL FIX: Convert both IDs to strings for comparison
-      const currentUserId = String(user?.id || '');
-      const messageSenderId = String(msg.senderId || '');
-      const isOwnMessage = currentUserId === messageSenderId;
-      
-      console.log('Is own message?', isOwnMessage);
-      
-      setMessages(prev => [...prev, { ...msg, isOwn: isOwnMessage }]);
-      
-      // Show notification only for messages from others
-      if (!isOwnMessage && isOpen) {
-        playNotification();
-        const senderName = msg.senderRole === 'driver' 
-          ? (driverInfo?.name || 'Driver') 
-          : (riderInfo?.name || 'Rider');
-        toast.success(`💬 ${senderName}: ${msg.message}`, {
-          duration: 3000,
-          icon: '💬'
-        });
-      }
-    });
-
-    // Listen for chat history
-    socket.on('chat-history', (history) => {
-      const currentUserId = String(user?.id || '');
-      const messagesWithOwn = (history || []).map(msg => ({
-        ...msg,
-        isOwn: String(msg.senderId || '') === currentUserId
-      }));
-      setMessages(messagesWithOwn);
-    });
-
-    return () => {
-      socket.off('chat-joined');
-      socket.off('new-message');
-      socket.off('chat-history');
-      socket.emit('leave-ride-chat', { rideId });
-      setIsJoined(false);
-    };
-  }, [socket, rideId, isOpen, user, driverInfo, riderInfo]);
-
-  // Scroll to bottom on new messages
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // Send message
-  const sendMessage = (e) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !socket || !rideId) return;
-
-    const messageData = {
-      rideId,
-      senderId: user?.id,
+    const msgData = {
+      rideId: rideId,
+      senderId: user?._id,
       senderName: user?.name || 'User',
       senderRole: user?.role || 'rider',
-      message: newMessage.trim(),
+      message: message.trim(),
       timestamp: new Date().toISOString()
     };
 
-    console.log('📤 Sending message:', messageData);
-
-    socket.emit('send-message', messageData);
-    setNewMessage('');
-  };
-
-  // Format time
-  const formatTime = (timestamp) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  // Get the other person's name
-  const getOtherPersonName = () => {
-    if (!user) return 'Other';
-    if (user.role === 'rider' && riderInfo) {
-      return riderInfo.name || 'Rider';
-    }
-    if (user.role === 'driver' && driverInfo) {
-      return driverInfo.name || 'Driver';
-    }
-    return 'Other';
-  };
-
-  // Get display name for a message sender
-  const getSenderDisplayName = (msg) => {
-    // Use the isOwn flag
-    if (msg.isOwn === true) {
-      return 'You';
-    }
+    // Add to local messages immediately (optimistic update)
+    setMessages(prev => [...prev, msgData]);
     
-    // If not own, show the sender's role
-    if (msg.senderRole === 'driver') {
-      return driverInfo?.name || 'Driver';
-    } else {
-      return riderInfo?.name || 'Rider';
+    // Clear input
+    setMessage('');
+    
+    // Scroll to bottom
+    setTimeout(() => {
+      scrollToBottom();
+    }, 100);
+
+    try {
+      // Save message to database via API
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        `${API_URL}/api/rides/${rideId}/chat`,
+        {
+          message: msgData.message,
+          senderId: msgData.senderId,
+          senderRole: msgData.senderRole,
+          senderName: msgData.senderName
+        },
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      // If saved successfully, replace local message with server version
+      if (response.data && response.data.message) {
+        const savedMsg = response.data.message;
+        setMessages(prev => 
+          prev.map(m => 
+            (m.message === msgData.message && m.senderId === msgData.senderId && !m._id) 
+              ? savedMsg 
+              : m
+          )
+        );
+      }
+
+      // Emit to socket for real-time delivery
+      socket?.emit('send-message', msgData);
+      
+    } catch (error) {
+      console.error('❌ Error sending message:', error);
+      // Remove the optimistic message if failed
+      setMessages(prev => prev.filter(m => 
+        !(m.message === msgData.message && m.senderId === msgData.senderId && !m._id)
+      ));
+      toast.error('Failed to send message');
     }
   };
 
+  // Handle Enter key
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  // Get other user info
+  const getOtherUser = () => {
+    if (user?.role === 'rider') {
+      return driverInfo || { name: 'Driver', role: 'driver' };
+    } else {
+      return riderInfo || { name: 'Rider', role: 'rider' };
+    }
+  };
+
+  const otherUser = getOtherUser();
+
+  // If not open, return null
   if (!isOpen) return null;
 
   return (
-    <div className="fixed bottom-20 right-4 w-80 h-96 bg-white rounded-xl shadow-2xl flex flex-col z-50 border border-gray-200">
-      {/* Chat Header */}
-      <div className="flex items-center justify-between p-3 bg-black text-white rounded-t-xl">
-        <div className="flex items-center space-x-2">
-          {user?.role === 'rider' && driverInfo ? (
-            <>
-              <FaCar className="h-4 w-4" />
-              <span className="text-sm font-medium">{driverInfo.name || 'Driver'}</span>
-            </>
-          ) : user?.role === 'driver' && riderInfo ? (
-            <>
-              <FaUser className="h-4 w-4" />
-              <span className="text-sm font-medium">{riderInfo.name || 'Rider'}</span>
-            </>
-          ) : (
-            <span className="text-sm font-medium">Chat</span>
-          )}
-          {isJoined && (
-            <span className="text-[10px] bg-green-500 px-2 py-0.5 rounded-full">Connected</span>
-          )}
-        </div>
-        <button
-          onClick={onClose}
-          className="text-gray-400 hover:text-white transition"
-        >
-          <FaTimes className="h-4 w-4" />
-        </button>
-      </div>
-
-      {/* Chat Messages */}
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}>
       <div 
-        ref={chatContainerRef}
-        className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50"
+        className="bg-[#0E1A2A] rounded-2xl w-full max-w-md h-[80vh] max-h-[600px] flex flex-col shadow-2xl border border-[#1A2A4A]"
+        onClick={(e) => e.stopPropagation()}
       >
-        {messages.length === 0 ? (
-          <div className="text-center text-gray-400 text-sm mt-8">
-            No messages yet. Say hello! 👋
+        {/* Header - Dark theme */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[#1A2A4A]">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 bg-[#1A2A4A] rounded-full flex items-center justify-center">
+              {otherUser?.role === 'driver' ? (
+                <FaCar className="text-gray-400" />
+              ) : (
+                <FaUser className="text-gray-400" />
+              )}
+            </div>
+            <div>
+              <p className="font-semibold text-sm text-white">{otherUser?.name || 'User'}</p>
+              <p className="text-xs text-gray-500 capitalize">{otherUser?.role || 'User'}</p>
+            </div>
           </div>
-        ) : (
-          messages.map((msg, index) => {
-            const isOwnMessage = msg.isOwn === true;
-            const isDriver = msg.senderRole === 'driver';
-            const displayName = getSenderDisplayName(msg);
-            
-            return (
-              <div
-                key={index}
-                className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[80%] rounded-lg px-3 py-2 ${
-                    isOwnMessage
-                      ? 'bg-black text-white rounded-br-none'
-                      : isDriver
-                      ? 'bg-blue-100 text-gray-800 rounded-bl-none'
-                      : 'bg-gray-200 text-gray-800 rounded-bl-none'
-                  }`}
-                >
-                  <div className="flex items-center space-x-2 mb-0.5">
-                    <span className="text-xs font-medium">
-                      {displayName}
-                    </span>
-                    <span className="text-[10px] opacity-70">
-                      {formatTime(msg.timestamp)}
-                    </span>
-                  </div>
-                  <p className="text-sm break-words">{msg.message}</p>
-                </div>
-              </div>
-            );
-          })
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-[#1A2A4A] rounded-full transition"
+          >
+            <FaTimes className="text-gray-400" />
+          </button>
+        </div>
 
-      {/* Chat Input */}
-      <form onSubmit={sendMessage} className="p-3 border-t border-gray-200 flex space-x-2">
-        <input
-          type="text"
-          value={newMessage}
-          onChange={(e) => setNewMessage(e.target.value)}
-          placeholder={`Message ${getOtherPersonName()}...`}
-          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black text-sm"
-          maxLength={500}
-        />
-        <button
-          type="submit"
-          disabled={!newMessage.trim()}
-          className="px-3 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        {/* Messages - Dark theme */}
+        <div 
+          ref={chatContainerRef}
+          className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#080E1F]"
         >
-          <FaPaperPlane className="h-4 w-4" />
-        </button>
-      </form>
+          {isLoading ? (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#1A6BFF] mx-auto"></div>
+              <p className="text-sm text-gray-500 mt-2">Loading messages...</p>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <p className="text-4xl mb-2">💬</p>
+              <p>No messages yet</p>
+              <p className="text-xs text-gray-600 mt-1">Start the conversation</p>
+            </div>
+          ) : (
+            messages.map((msg, index) => {
+              const isSender = msg.senderId === user?._id;
+              return (
+                <div
+                  key={msg._id || index}
+                  className={`flex ${isSender ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div
+                    className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
+                      isSender
+                        ? 'bg-[#1A6BFF] text-white rounded-br-none'
+                        : 'bg-[#1A2A4A] text-white rounded-bl-none'
+                    }`}
+                  >
+                    {!isSender && (
+                      <p className="text-xs font-medium text-gray-400 mb-1">
+                        {msg.senderName || 'User'}
+                      </p>
+                    )}
+                    <p className="text-sm break-words">{msg.message}</p>
+                    <p className={`text-[10px] mt-1 ${isSender ? 'text-blue-200' : 'text-gray-500'}`}>
+                      {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { 
+                        hour: '2-digit', 
+                        minute: '2-digit' 
+                      }) : 'Just now'}
+                    </p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input - Dark theme */}
+        <div className="p-3 border-t border-[#1A2A4A] bg-[#0E1A2A] rounded-b-2xl">
+          <div className="flex items-center space-x-2">
+            <input
+              type="text"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder={`Message ${otherUser?.name || 'User'}...`}
+              className="flex-1 px-4 py-2.5 bg-[#080E1F] border border-[#1A2A4A] rounded-full focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] text-white placeholder-gray-500 text-sm"
+            />
+            <button
+              onClick={sendMessage}
+              disabled={!message.trim()}
+              className="p-2.5 bg-[#1A6BFF] text-white rounded-full hover:bg-[#5294FF] transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <FaPaperPlane className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

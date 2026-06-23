@@ -17,8 +17,7 @@ const PEAK_SURCHARGE = 0.20; // 20%
 const SERVICE_RATES = {
   'economy': 3.60,   // Vai Go - R3.60/km
   'standard': 4.00,  // Vai X - R4.00/km
-  'premium': 5.00,   // Vai Premium - R5.00/km
-  'van': 4.50        // Vai Van (7-Seater) - R4.50/km
+
 };
 
 // Peak hours (24-hour format)
@@ -139,20 +138,7 @@ export const getServiceTypes = () => {
       multiplier: 1.0,
       ratePerKm: 4.00
     },
-    { 
-      id: 'premium', 
-      name: 'Vai Premium', 
-      description: 'Luxury ride', 
-      multiplier: 1.0,
-      ratePerKm: 5.00
-    },
-    { 
-      id: 'van', 
-      name: 'Vai Van', 
-      description: '7-Seater', 
-      multiplier: 1.0,
-      ratePerKm: 4.50
-    }
+   
   ];
 };
 
@@ -215,8 +201,7 @@ export const getFareBreakdownDisplay = (fareData) => {
   const serviceNames = {
     'economy': 'Vai Go',
     'standard': 'Vai X',
-    'premium': 'Vai Premium',
-    'van': 'Vai Van'
+    
   };
   
   return {

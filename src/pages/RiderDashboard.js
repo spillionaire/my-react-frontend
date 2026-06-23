@@ -23,7 +23,9 @@ import {
   FaCreditCard,
   FaMoneyBillWave,
   FaWallet,
-  FaStar
+  FaStar,
+  FaCheckCircle,
+  FaUserCircle
 } from 'react-icons/fa';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -45,6 +47,7 @@ import {
 import { getCarIconUrl } from '../assets/car-icon';
 import Chat from '../components/Chat';
 import RatingModal from '../components/RatingModal';
+import ProfileDropdown from '../components/ProfileDropdown';
 import { API_URL } from '../config';
 import { getLocationWithFallback, isGPSAvailable, isHTTPSRequired, getGPSErrorMessage } from '../utils/location';
 
@@ -83,9 +86,19 @@ const carIcon = new L.Icon({
   className: 'car-marker'
 });
 
+// Small car icon for available drivers
+const getDriverMarkerIcon = () => {
+  return new L.Icon({
+    iconUrl: getCarIconUrl(),
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    className: 'driver-available-marker'
+  });
+};
+
 const SA_BOUNDS = getSouthAfricaBounds();
 
-// ============ CHANGE MAP VIEW - SMART SNAPPING ============
+// ============ CHANGE MAP VIEW ============
 function ChangeMapView({ targetLocation, zoom = 14 }) {
   const map = useMap();
   const [lastSnappedLocation, setLastSnappedLocation] = useState(null);
@@ -104,7 +117,7 @@ function ChangeMapView({ targetLocation, zoom = 14 }) {
   return null;
 }
 
-// ============ LOCATION PICKER - DISABLED DURING ACTIVE RIDE ============
+// ============ LOCATION PICKER ============
 function LocationPicker({ setPickup, setPickupAddress, isRideActive }) {
   useMapEvents({
     click(e) {
@@ -126,7 +139,7 @@ function LocationPicker({ setPickup, setPickupAddress, isRideActive }) {
   return null;
 }
 
-// Place Search
+// Place Search - Updated with dark theme styling
 function PlaceSearch({ onSelect, placeholder, value, setValue }) {
   const [suggestions, setSuggestions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -183,7 +196,7 @@ function PlaceSearch({ onSelect, placeholder, value, setValue }) {
         <input
           type="text"
           placeholder={placeholder}
-          className="w-full px-3 py-2 pr-8 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-black"
+          className="w-full px-3 py-2 pr-8 bg-[#0E1A2A] border border-[#1A2A4A] rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] placeholder:text-gray-500"
           value={searchTerm}
           onChange={handleInputChange}
           onFocus={() => {
@@ -196,22 +209,22 @@ function PlaceSearch({ onSelect, placeholder, value, setValue }) {
         />
         {isLoading && (
           <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
-            <div className="animate-spin h-4 w-4 border-2 border-black border-t-transparent rounded-full"></div>
+            <div className="animate-spin h-4 w-4 border-2 border-[#1A6BFF] border-t-transparent rounded-full"></div>
           </div>
         )}
       </div>
       {showSuggestions && suggestions.length > 0 && (
-        <div className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-48 overflow-y-auto">
+        <div className="absolute z-50 w-full bg-[#0E1A2A] border border-[#1A2A4A] rounded-xl shadow-lg mt-1 max-h-48 overflow-y-auto">
           {suggestions.map((item, index) => (
             <div
               key={index}
-              className="px-3 py-2 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+              className="px-3 py-2 hover:bg-[#1A2A4A] cursor-pointer border-b border-[#1A2A4A] last:border-b-0"
               onMouseDown={() => handleSelect(item)}
             >
               <div className="flex items-start">
-                <FaSearch className="mt-1 mr-2 text-gray-400 flex-shrink-0 h-4 w-4" />
+                <FaSearch className="mt-1 mr-2 text-gray-500 flex-shrink-0 h-4 w-4" />
                 <div>
-                  <div className="text-sm font-medium text-gray-800">
+                  <div className="text-sm font-medium text-white">
                     {item.display_name?.split(',')[0] || item.name}
                   </div>
                   <div className="text-xs text-gray-500 truncate">{item.display_name}</div>
@@ -227,7 +240,7 @@ function PlaceSearch({ onSelect, placeholder, value, setValue }) {
 
 // ============ MAIN COMPONENT ============
 const RiderDashboard = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const socket = useSocket();
   const navigate = useNavigate();
   
@@ -286,6 +299,9 @@ const RiderDashboard = () => {
   // Responsive detection
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
+  // ============ AVAILABLE DRIVERS STATE ============
+  const [availableDrivers, setAvailableDrivers] = useState([]);
+
   useEffect(() => {
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -300,6 +316,51 @@ const RiderDashboard = () => {
   const activeRideFetched = useRef(false);
   const locationRequestInterval = useRef(null);
   const routeCalculationTimeout = useRef(null);
+
+  // ============ FETCH AVAILABLE DRIVERS ============
+  useEffect(() => {
+    if (!user || currentRide) return;
+    
+    const fetchAvailableDrivers = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await axios.get(`${API_URL}/api/auth/online-drivers`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        console.log('📡 Online drivers response:', response.data);
+        
+        if (response.data && response.data.drivers) {
+          const nearby = response.data.drivers.filter(driver => {
+            if (!driver.location || !driver.location.lat || !driver.location.lng) {
+              return false;
+            }
+            const dist = calculateDistance(
+              pickup.lat,
+              pickup.lng,
+              driver.location.lat,
+              driver.location.lng
+            );
+            return dist <= 10;
+          });
+          setAvailableDrivers(nearby);
+          console.log(`📍 Found ${nearby.length} nearby drivers out of ${response.data.drivers.length} total`);
+        } else {
+          console.log('⚠️ No drivers found or invalid response');
+          setAvailableDrivers([]);
+        }
+      } catch (error) {
+        console.error('❌ Error fetching drivers:', error);
+        setAvailableDrivers([]);
+      }
+    };
+
+    fetchAvailableDrivers();
+    
+    const interval = setInterval(fetchAvailableDrivers, 30000);
+    
+    return () => clearInterval(interval);
+  }, [user, currentRide, pickup]);
 
   // ============ PERSIST ROUTE DATA ============
   useEffect(() => {
@@ -556,7 +617,6 @@ const RiderDashboard = () => {
         const fareData = calculateFareSA(route.distance, 'johannesburg', isPeak, selectedService);
         setFareBreakdown(fareData.breakdown);
         
-        // Fix: Use toast with icon instead of toast.warning
         if (route.isFallback) {
           toast('Using approximate route (OSM unavailable)', { icon: '⚠️' });
         }
@@ -742,6 +802,33 @@ const RiderDashboard = () => {
       }
     };
 
+    socket.on('new-message', (msg) => {
+      if (msg.senderId !== user?._id && !isChatOpen) {
+        setUnreadMessages(prev => prev + 1);
+        const senderName = msg.senderRole === 'driver' ? (driverInfo?.name || 'Driver') : 'Rider';
+        toast.success(`💬 ${senderName}: ${msg.message}`, { duration: 3000, icon: '💬' });
+      }
+    });
+
+    socket.on('drivers-update', (drivers) => {
+      console.log('📡 Received drivers update:', drivers.length);
+      if (currentRide) return;
+      
+      const nearby = drivers.filter(driver => {
+        if (!driver.location || !driver.location.lat || !driver.location.lng) {
+          return false;
+        }
+        const dist = calculateDistance(
+          pickup.lat,
+          pickup.lng,
+          driver.location.lat,
+          driver.location.lng
+        );
+        return dist <= 10;
+      });
+      setAvailableDrivers(nearby);
+    });
+
     socket.on('driver-location', handleDriverLocation);
     socket.on(`ride-${currentRide?._id}-status`, handleRideStatus);
     socket.on(`ride-${currentRide?._id}-accepted`, handleRideAccepted);
@@ -760,6 +847,8 @@ const RiderDashboard = () => {
       socket.off(`ride-${currentRide?._id}-status`, handleRideStatus);
       socket.off(`ride-${currentRide?._id}-accepted`, handleRideAccepted);
       socket.off('ride-driver-cancelled', handleDriverCancelled);
+      socket.off('new-message');
+      socket.off('drivers-update');
     };
   }, [socket, currentRide, pickup, user, rideStatus, driverId]);
 
@@ -964,60 +1053,62 @@ const RiderDashboard = () => {
   const isRideActive = currentRide && rideStatus !== 'completed' && rideStatus !== 'cancelled';
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
-      {/* Header */}
-      <header className="w-full bg-white border-b border-gray-100 px-4 py-3 flex justify-between items-center shadow-none z-30 flex-shrink-0">
+    <div className="h-screen flex flex-col bg-[#03060F] overflow-hidden">
+      {/* Header - Dark theme */}
+      <header className="w-full bg-[#080E1F] border-b border-[#1A2A4A] px-4 py-3 flex justify-between items-center shadow-none z-30 flex-shrink-0">
         <div className="flex items-center space-x-3">
           <div className="flex items-center">
-            <FaCar className="h-6 w-6 text-black mr-2" />
-            <h1 className="text-xl font-bold text-black">Vai</h1>
+            <div className="w-8 h-8 bg-[#1A6BFF] rounded-xl flex items-center justify-center text-white font-bold text-sm mr-2 shadow-lg shadow-[#1A6BFF]/30">
+              V
+            </div>
+            <h1 className="text-xl font-bold text-white">Vai</h1>
           </div>
           <button 
             onClick={() => navigate('/profile')} 
-            className="text-sm text-gray-500 hover:text-black transition-colors font-medium"
+            className="text-sm text-gray-400 hover:text-white transition-colors font-medium"
           >
             {user?.role === 'driver' ? 'Driver' : 'Rider'}
           </button>
           {isGettingLocation && (
-            <span className="text-[10px] text-gray-400">📍 GPS</span>
+            <span className="text-[10px] text-gray-500">📍 GPS</span>
           )}
           {isPeak && (
-            <span className="text-[10px] text-orange-500">⚡ Peak</span>
+            <span className="text-[10px] text-orange-400">⚡ Peak</span>
           )}
           {driverLocation && (
-            <span className="text-[10px] text-green-500">● Live</span>
+            <span className="text-[10px] text-green-400">● Live</span>
           )}
           {driverSpeed > 0 && rideStatus === 'accepted' && (
-            <span className="text-[10px] text-blue-500">{Math.round(driverSpeed)} km/h</span>
+            <span className="text-[10px] text-blue-400">{Math.round(driverSpeed)} km/h</span>
+          )}
+          {user?.isVerified && (
+            <span className="text-[10px] text-blue-400 flex items-center">
+              <FaCheckCircle className="mr-0.5 text-xs" /> Verified
+            </span>
           )}
         </div>
         <div className="flex items-center space-x-4">
           {!isMobile && (
             <button 
               onClick={() => navigate('/history')} 
-              className="text-gray-400 hover:text-black transition-colors"
+              className="text-gray-400 hover:text-white transition-colors"
             >
               <FaHistory className="h-5 w-5" />
             </button>
           )}
           <button 
             onClick={requestDriverLocation}
-            className="text-gray-400 hover:text-blue-500 transition-colors"
+            className="text-gray-400 hover:text-blue-400 transition-colors"
           >
             <FaCrosshairs className="h-5 w-5" />
           </button>
           <button 
             onClick={() => setShowDebug(!showDebug)} 
-            className="text-gray-400 hover:text-black transition-colors"
+            className="text-gray-400 hover:text-white transition-colors"
           >
             <FaBug className="h-5 w-5" />
           </button>
-          <button 
-            onClick={handleLogout} 
-            className="text-gray-400 hover:text-red-500 transition-colors"
-          >
-            <FaSignOutAlt className="h-5 w-5" />
-          </button>
+          <ProfileDropdown user={user} logout={handleLogout} />
         </div>
       </header>
 
@@ -1058,24 +1149,54 @@ const RiderDashboard = () => {
           {/* Pickup Marker */}
           <Marker position={[pickup.lat, pickup.lng]} icon={pickupIcon}>
             <Popup>
-              <p className="font-bold text-green-600">📍 Pickup</p>
-              <p className="text-xs">{pickupAddress || 'Your location'}</p>
+              <p className="font-bold text-green-500">📍 Pickup</p>
+              <p className="text-xs text-gray-600">{pickupAddress || 'Your location'}</p>
             </Popup>
           </Marker>
           
           {/* Dropoff Marker */}
           <Marker position={[dropoff.lat, dropoff.lng]} icon={dropoffIcon}>
             <Popup>
-              <p className="font-bold text-red-600">🏁 Dropoff</p>
-              <p className="text-xs">{destination || 'Destination'}</p>
+              <p className="font-bold text-red-500">🏁 Dropoff</p>
+              <p className="text-xs text-gray-600">{destination || 'Destination'}</p>
             </Popup>
           </Marker>
+
+          {/* ============ AVAILABLE DRIVER MARKERS ============ */}
+          {!currentRide && availableDrivers.length > 0 && availableDrivers.map((driver) => {
+            const driverIcon = getDriverMarkerIcon();
+            return (
+              <Marker 
+                key={driver._id || Math.random().toString()}
+                position={[driver.location.lat, driver.location.lng]}
+                icon={driverIcon}
+              >
+                <Popup>
+                  <div className="text-center min-w-[160px] bg-[#0E1A2A] text-white">
+                    <div className="flex items-center justify-center space-x-2 mb-1">
+                      <span className="font-medium text-sm">{driver.name || 'Driver'}</span>
+                      {driver.isVerified && (
+                        <span className="text-blue-400 text-xs">✓</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400">{driver.vehicle?.model || 'Car'}</p>
+                    <p className="text-xs text-green-400 font-medium">● Available</p>
+                    <div className="flex items-center justify-center space-x-2 mt-1">
+                      <span className="text-xs text-yellow-400">★ {driver.rating?.average?.toFixed(1) || 'New'}</span>
+                      <span className="text-xs text-gray-500">•</span>
+                      <span className="text-xs text-gray-500">{driver.totalTrips || 0} trips</span>
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
+            );
+          })}
           
-          {/* Route Line - BLACK color */}
+          {/* Route Line - BLUE accent color */}
           {routeData && routeData.points && routeData.points.length > 1 && (
             <Polyline 
               positions={routeData.points.map(p => [p.lat, p.lng])} 
-              color="#000000" 
+              color="#1A6BFF" 
               weight={4} 
               opacity={0.8}
               smoothFactor={1}
@@ -1091,52 +1212,52 @@ const RiderDashboard = () => {
               rotationOrigin="center"
             >
               <Popup>
-                <div className="text-center min-w-[150px]">
-                  <p className="font-bold text-blue-600">🚗 Driver</p>
+                <div className="text-center min-w-[150px] bg-[#0E1A2A] text-white">
+                  <p className="font-bold text-blue-400">🚗 Driver</p>
                   {driverInfo && (
                     <>
                       <p className="text-sm font-medium">{driverInfo.name}</p>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-gray-400">
                         {driverInfo.vehicle?.model} • {driverInfo.vehicle?.plateNumber}
                       </p>
                     </>
                   )}
                   {distanceToDriver !== null && (
-                    <p className="text-xs mt-1">{formatDistance(distanceToDriver)} away</p>
+                    <p className="text-xs mt-1 text-gray-400">{formatDistance(distanceToDriver)} away</p>
                   )}
                   {driverEta !== null && rideStatus === 'accepted' && (
-                    <p className="text-xs text-green-600 font-medium">ETA: {formatTime(driverEta)}</p>
+                    <p className="text-xs text-green-400 font-medium">ETA: {formatTime(driverEta)}</p>
                   )}
                   {driverArrivalTime && rideStatus === 'accepted' && (
-                    <p className="text-xs text-gray-400">Arrives at {driverArrivalTime}</p>
+                    <p className="text-xs text-gray-500">Arrives at {driverArrivalTime}</p>
                   )}
                   {driverSpeed > 0 && (
-                    <p className="text-xs text-gray-400">{Math.round(driverSpeed)} km/h</p>
+                    <p className="text-xs text-gray-500">{Math.round(driverSpeed)} km/h</p>
                   )}
                 </div>
               </Popup>
             </Marker>
           )}
           
-          {/* Driver route line (driver to pickup) - BLACK dashed */}
+          {/* Driver route line (driver to pickup) - BLUE dashed */}
           {driverRoute.length > 0 && currentRide && rideStatus === 'accepted' && (
             <Polyline 
               positions={driverRoute.map(p => [p.lat, p.lng])} 
-              color="#000000" 
+              color="#1A6BFF" 
               weight={3} 
               opacity={0.7} 
               dashArray="8, 6"
             />
           )}
           
-          {/* Pickup to Dropoff Route Line - BLACK dashed */}
+          {/* Pickup to Dropoff Route Line - BLUE dashed */}
           {currentRide && currentRide.pickupLocation && currentRide.dropoffLocation && rideStatus !== 'cancelled' && (
             <Polyline 
               positions={[
                 [currentRide.pickupLocation.lat, currentRide.pickupLocation.lng],
                 [currentRide.dropoffLocation.lat, currentRide.dropoffLocation.lng]
               ]} 
-              color="#000000"
+              color="#1A6BFF"
               weight={3} 
               opacity={0.4}
               dashArray="10, 8"
@@ -1144,55 +1265,56 @@ const RiderDashboard = () => {
           )}
         </MapContainer>
 
-        {/* Debug Panel */}
+        {/* Debug Panel - Dark theme */}
         {showDebug && (
-          <div className="absolute top-2 left-2 bg-black/90 text-white p-3 rounded-lg z-50 max-w-xs text-xs font-mono overflow-auto max-h-60">
-            <p className="font-bold mb-1">🐛 Debug Info</p>
-            <p>Ride Status: {rideStatus || 'none'}</p>
-            <p>Driver ID: {driverId || '❌ none'}</p>
-            <p>Driver Location: {driverLocation ? '✅' : '❌'}</p>
-            <p>Route Points: {driverRoute.length}</p>
-            <p>Distance: {distanceToDriver !== null ? formatDistance(distanceToDriver) : '--'}</p>
-            <p>ETA: {driverEta !== null ? formatTime(driverEta) : '--'}</p>
-            <p>Speed: {driverSpeed > 0 ? `${Math.round(driverSpeed)} km/h` : '--'}</p>
-            <p>Socket: {socket ? '✅ Connected' : '❌'}</p>
-            <p>Ride ID: {currentRide?._id?.slice(-6) || 'none'}</p>
-            <p>Pickup: {pickup ? `${pickup.lat.toFixed(4)}, ${pickup.lng.toFixed(4)}` : '❌'}</p>
-            <p>Route Points Saved: {routeData?.points?.length || 0}</p>
-            <p className="text-yellow-300 text-[10px] mt-1">Last update: {debugInfo.timestamp || 'never'}</p>
+          <div className="absolute top-2 left-2 bg-[#080E1F]/90 text-white p-3 rounded-xl z-50 max-w-xs text-xs font-mono overflow-auto max-h-60 border border-[#1A2A4A]">
+            <p className="font-bold mb-1 text-blue-400">🐛 Debug Info</p>
+            <p className="text-gray-400">Ride Status: {rideStatus || 'none'}</p>
+            <p className="text-gray-400">Driver ID: {driverId || '❌ none'}</p>
+            <p className="text-gray-400">Driver Location: {driverLocation ? '✅' : '❌'}</p>
+            <p className="text-gray-400">Route Points: {driverRoute.length}</p>
+            <p className="text-gray-400">Distance: {distanceToDriver !== null ? formatDistance(distanceToDriver) : '--'}</p>
+            <p className="text-gray-400">ETA: {driverEta !== null ? formatTime(driverEta) : '--'}</p>
+            <p className="text-gray-400">Speed: {driverSpeed > 0 ? `${Math.round(driverSpeed)} km/h` : '--'}</p>
+            <p className="text-gray-400">Socket: {socket ? '✅ Connected' : '❌'}</p>
+            <p className="text-gray-400">Ride ID: {currentRide?._id?.slice(-6) || 'none'}</p>
+            <p className="text-gray-400">Pickup: {pickup ? `${pickup.lat.toFixed(4)}, ${pickup.lng.toFixed(4)}` : '❌'}</p>
+            <p className="text-gray-400">Route Points Saved: {routeData?.points?.length || 0}</p>
+            <p className="text-gray-400">Available Drivers: {availableDrivers.length}</p>
+            <p className="text-yellow-400 text-[10px] mt-1">Last update: {debugInfo.timestamp || 'never'}</p>
             <button 
               onClick={requestDriverLocation}
-              className="mt-2 bg-blue-600 text-white px-2 py-1 rounded text-xs w-full"
+              className="mt-2 bg-[#1A6BFF] text-white px-2 py-1 rounded text-xs w-full hover:bg-[#5294FF] transition"
             >
               📡 Request Location Now
             </button>
           </div>
         )}
 
-        {/* Loading overlay */}
+        {/* Loading overlay - Dark theme */}
         {(tileLoading || !mapLoaded) && (
-          <div className="absolute inset-0 bg-gray-100 flex flex-col items-center justify-center z-10">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-black mb-3"></div>
-            <p className="text-gray-500 text-sm">Loading map...</p>
+          <div className="absolute inset-0 bg-[#080E1F] flex flex-col items-center justify-center z-10">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#1A6BFF] mb-3"></div>
+            <p className="text-gray-400 text-sm">Loading map...</p>
           </div>
         )}
 
         {/* Location error */}
         {locationError && !isGettingLocation && (
-          <div className="absolute top-2 left-1/2 transform -translate-x-1/2 bg-orange-500 text-white px-3 py-1 rounded-lg shadow-lg text-xs z-30">
+          <div className="absolute top-2 left-1/2 transform -translate-x-1/2 bg-orange-500/90 text-white px-3 py-1 rounded-xl shadow-lg text-xs z-30 backdrop-blur-sm">
             {locationError}
           </div>
         )}
 
-        {/* ============ MOBILE: INPUT SHEET - FIXED ============ */}
+        {/* ============ MOBILE: INPUT SHEET - Dark theme ============ */}
         {isMobile && !currentRide && (
-          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-3 z-30 border-t border-gray-100 safe-area-bottom" 
+          <div className="absolute bottom-0 left-0 right-0 bg-[#0E1A2A] rounded-t-2xl shadow-lg p-3 z-30 border-t border-[#1A2A4A] safe-area-bottom" 
                style={{ marginBottom: '70px', paddingBottom: '12px' }}>
             <div className="flex items-center space-x-2">
               <button
                 onClick={updateLocation}
                 disabled={isGettingLocation}
-                className="p-2 bg-black text-white rounded-lg hover:bg-gray-800 transition disabled:opacity-50 flex-shrink-0"
+                className="p-2 bg-[#1A6BFF] text-white rounded-xl hover:bg-[#5294FF] transition disabled:opacity-50 flex-shrink-0"
               >
                 <FaCrosshairs className="h-4 w-4" />
               </button>
@@ -1210,11 +1332,10 @@ const RiderDashboard = () => {
                   setValue={setDestination}
                 />
               </div>
-              {/* Request Ride Button - Mobile */}
               <button
                 onClick={requestRide}
                 disabled={isRequesting || !destination || distance === 0 || isGettingLocation || !routeData}
-                className="p-2 bg-black text-white rounded-lg hover:bg-gray-800 transition disabled:opacity-50 flex-shrink-0"
+                className="p-2 bg-[#1A6BFF] text-white rounded-xl hover:bg-[#5294FF] transition disabled:opacity-50 flex-shrink-0"
               >
                 {isRequesting ? (
                   <FaSpinner className="h-5 w-5 animate-spin" />
@@ -1226,27 +1347,27 @@ const RiderDashboard = () => {
             {fareBreakdown && routeData && (
               <div className="flex justify-between items-center mt-2 px-1">
                 <div>
-                  <p className="text-xs text-gray-500">{routeData.distanceText} • {routeData.durationText}</p>
-                  <p className="text-xs text-gray-500 capitalize">{selectedService}</p>
-                  <p className="text-xs text-gray-500">Payment: {selectedPayment.toUpperCase()}</p>
+                  <p className="text-xs text-gray-400">{routeData.distanceText} • {routeData.durationText}</p>
+                  <p className="text-xs text-gray-400 capitalize">{selectedService}</p>
+                  <p className="text-xs text-gray-400">Payment: {selectedPayment.toUpperCase()}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-bold text-green-600">R{estimatedFare.toFixed(2)}</p>
+                  <p className="text-sm font-bold text-green-400">R{estimatedFare.toFixed(2)}</p>
                 </div>
               </div>
             )}
             {!destination && (
-              <p className="text-xs text-red-500 text-center mt-1">Please enter a destination</p>
+              <p className="text-xs text-red-400 text-center mt-1">Please enter a destination</p>
             )}
             {isCalculatingRoute && (
-              <p className="text-xs text-blue-500 text-center mt-1">Calculating route...</p>
+              <p className="text-xs text-blue-400 text-center mt-1">Calculating route...</p>
             )}
           </div>
         )}
 
-        {/* ============ MOBILE: RIDE STATUS SHEET ============ */}
+        {/* ============ MOBILE: RIDE STATUS SHEET - Dark theme ============ */}
         {isMobile && currentRide && rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
-          <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl shadow-lg p-4 z-30 border-t border-gray-100 safe-area-bottom" 
+          <div className="absolute bottom-0 left-0 right-0 bg-[#0E1A2A] rounded-t-2xl shadow-lg p-4 z-30 border-t border-[#1A2A4A] safe-area-bottom" 
                style={{ marginBottom: '70px', paddingBottom: '12px' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
@@ -1254,68 +1375,99 @@ const RiderDashboard = () => {
                   rideStatus === 'arrived' ? 'bg-purple-500' :
                   rideStatus === 'in-progress' ? 'bg-blue-500' :
                   rideStatus === 'accepted' ? 'bg-yellow-500' :
-                  'bg-gray-400'
+                  'bg-gray-500'
                 } animate-pulse`}></div>
-                <span className="text-sm font-semibold">{getRiderStatusMessage()}</span>
+                <span className="text-sm font-semibold text-white">{getRiderStatusMessage()}</span>
               </div>
-              <span className="text-lg font-bold text-green-600">R{currentRide.fare?.toFixed(2)}</span>
+              <span className="text-lg font-bold text-green-400">R{currentRide.fare?.toFixed(2)}</span>
             </div>
 
             {currentRide?.tripReference && (
-              <div className="flex justify-between items-center bg-gray-50 px-3 py-1.5 rounded-lg mb-2">
+              <div className="flex justify-between items-center bg-[#0A1228] px-3 py-1.5 rounded-lg mb-2 border border-[#1A2A4A]">
                 <span className="text-xs text-gray-500">Trip Reference</span>
-                <span className="text-xs font-mono font-medium bg-white px-2 py-0.5 rounded border border-gray-200">
+                <span className="text-xs font-mono font-medium text-white bg-[#1A2A4A] px-2 py-0.5 rounded border border-[#1A2A4A]">
                   {currentRide.tripReference}
                 </span>
               </div>
             )}
 
+            {/* ALWAYS SHOW PICKUP AND DROPOFF ADDRESSES */}
+            <div className="mt-2 p-3 bg-[#0A1228] rounded-xl border border-[#1A2A4A]">
+              <div className="flex items-start space-x-2">
+                <FaMapMarkerAlt className="text-green-400 mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-green-400">Pickup</p>
+                  <p className="text-sm text-white truncate">{currentRide?.pickupLocation?.address || pickupAddress || 'Pickup location'}</p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-2 mt-2">
+                <FaFlag className="text-red-400 mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-red-400">Dropoff</p>
+                  <p className="text-sm text-white truncate">{currentRide?.dropoffLocation?.address || destination || 'Destination'}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Searching for drivers animation */}
+            {rideStatus === 'requested' && (
+              <div className="mt-2 p-3 bg-yellow-500/10 rounded-xl border border-yellow-500/20 text-center">
+                <div className="flex items-center justify-center space-x-2">
+                  <div className="w-3 h-3 bg-green-400 rounded-full animate-ping"></div>
+                  <div className="w-3 h-3 bg-green-400 rounded-full animate-ping delay-75"></div>
+                  <div className="w-3 h-3 bg-green-400 rounded-full animate-ping delay-150"></div>
+                </div>
+                <p className="text-sm text-yellow-400 mt-2">🔍 Searching for nearby drivers...</p>
+                <p className="text-xs text-yellow-400/60">Your pickup location is being broadcasted to drivers</p>
+              </div>
+            )}
+
             {driverInfo && rideStatus === 'accepted' && (
-              <div className="mt-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
+              <div className="mt-2 p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <div className="w-8 h-8 bg-blue-200 rounded-full flex items-center justify-center">
-                      <FaUser className="h-4 w-4 text-blue-600" />
+                    <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
+                      <FaUser className="h-4 w-4 text-blue-400" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium">{driverInfo.name}</p>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-sm font-medium text-white">{driverInfo.name}</p>
+                      <p className="text-xs text-gray-400">
                         {driverInfo.vehicle?.model} • {driverInfo.vehicle?.plateNumber}
                       </p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-gray-500">ETA</p>
-                    <p className="text-sm font-bold text-green-600">
+                    <p className="text-xs text-gray-400">ETA</p>
+                    <p className="text-sm font-bold text-green-400">
                       {driverEta !== null ? formatTime(driverEta) : '...'}
                     </p>
                   </div>
                 </div>
                 
-                <div className="mt-3 pt-3 border-t border-blue-200">
+                <div className="mt-3 pt-3 border-t border-blue-500/20">
                   <div className="flex justify-between items-center">
                     <div>
-                      <p className="text-xs text-gray-500">Driver distance</p>
-                      <p className="font-semibold text-sm">
+                      <p className="text-xs text-gray-400">Driver distance</p>
+                      <p className="font-semibold text-sm text-white">
                         {distanceToDriver !== null ? formatDistance(distanceToDriver) : '...'}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs text-gray-500">Arrival time</p>
-                      <p className="font-semibold text-sm text-green-600">
+                      <p className="text-xs text-gray-400">Arrival time</p>
+                      <p className="font-semibold text-sm text-green-400">
                         {driverArrivalTime || '...'}
                       </p>
                     </div>
                   </div>
                   {distanceToDriver !== null && driverEta !== null && (
                     <div className="mt-2">
-                      <div className="flex justify-between text-xs text-gray-400 mb-1">
+                      <div className="flex justify-between text-xs text-gray-500 mb-1">
                         <span>{formatDistance(distanceToDriver)} away</span>
                         <span>~{formatTime(driverEta)}</span>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-1.5">
+                      <div className="w-full bg-[#1A2A4A] rounded-full h-1.5">
                         <div 
-                          className="bg-blue-600 h-1.5 rounded-full transition-all duration-500"
+                          className="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
                           style={{ width: `${Math.min(100, 100 - (distanceToDriver / 10) * 100)}%` }}
                         ></div>
                       </div>
@@ -1332,20 +1484,20 @@ const RiderDashboard = () => {
             )}
 
             {rideStatus === 'arrived' && (
-              <div className="mt-2 p-3 bg-purple-50 rounded-lg border border-purple-200 text-center">
-                <p className="text-purple-700 font-medium">📍 Driver has arrived at your location</p>
-                <p className="text-xs text-purple-500 mt-1">Please meet your driver at the pickup point</p>
+              <div className="mt-2 p-3 bg-purple-500/10 rounded-xl border border-purple-500/20 text-center">
+                <p className="text-purple-400 font-medium">📍 Driver has arrived at your location</p>
+                <p className="text-xs text-purple-400/60 mt-1">Please meet your driver at the pickup point</p>
               </div>
             )}
 
             {rideStatus === 'in-progress' && (
-              <div className="mt-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
+              <div className="mt-2 p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <FaCar className="text-blue-600 h-4 w-4" />
-                    <span className="text-sm text-gray-600">Ride in progress</span>
+                    <FaCar className="text-blue-400 h-4 w-4" />
+                    <span className="text-sm text-gray-300">Ride in progress</span>
                   </div>
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-gray-400">
                     {distance > 0 && `${formatDistance(distance)} to destination`}
                   </span>
                 </div>
@@ -1357,7 +1509,7 @@ const RiderDashboard = () => {
                 <button
                   onClick={cancelRide}
                   disabled={isLoading}
-                  className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition"
+                  className="flex-1 py-2 bg-red-500/20 text-red-400 rounded-xl text-sm hover:bg-red-500/30 transition border border-red-500/20"
                 >
                   Cancel Request
                 </button>
@@ -1367,13 +1519,13 @@ const RiderDashboard = () => {
                   <button
                     onClick={cancelRide}
                     disabled={isLoading}
-                    className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 transition"
+                    className="flex-1 py-2 bg-red-500/20 text-red-400 rounded-xl text-sm hover:bg-red-500/30 transition border border-red-500/20"
                   >
                     Cancel Ride
                   </button>
                   <button
                     onClick={() => setIsChatOpen(true)}
-                    className="py-2 px-4 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200 transition relative flex items-center"
+                    className="py-2 px-4 bg-blue-500/20 text-blue-400 rounded-xl text-sm hover:bg-blue-500/30 transition relative flex items-center border border-blue-500/20"
                   >
                     <FaComment className="mr-1" /> Chat
                     {unreadMessages > 0 && (
@@ -1387,7 +1539,7 @@ const RiderDashboard = () => {
               {rideStatus === 'in-progress' && (
                 <button
                   onClick={() => setIsChatOpen(true)}
-                  className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition flex items-center justify-center relative"
+                  className="flex-1 py-2 bg-blue-500/20 text-blue-400 rounded-xl text-sm hover:bg-blue-500/30 transition flex items-center justify-center relative border border-blue-500/20"
                 >
                   <FaComment className="mr-2" /> Contact Driver
                   {unreadMessages > 0 && (
@@ -1401,34 +1553,39 @@ const RiderDashboard = () => {
           </div>
         )}
 
-        {/* ============ DESKTOP: SIDE PANEL ============ */}
+        {/* ============ DESKTOP: SIDE PANEL - Dark theme ============ */}
         {!isMobile && (
-          <div className="absolute top-0 right-0 h-full w-96 bg-white border-l shadow-lg overflow-y-auto z-20">
+          <div className="absolute top-0 right-0 h-full w-96 bg-[#080E1F] border-l border-[#1A2A4A] shadow-lg overflow-y-auto z-20">
             <div className="p-6 pb-20">
-              <h2 className="text-xl font-bold mb-6 flex items-center">
-                <FaCar className="mr-2" /> Request a Ride
+              <h2 className="text-xl font-bold mb-6 flex items-center text-white">
+                <FaCar className="mr-2 text-[#1A6BFF]" /> Request a Ride
+                {user?.isVerified && (
+                  <span className="ml-2 text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full flex items-center border border-blue-500/20">
+                    <FaCheckCircle className="mr-1 text-xs" /> Verified
+                  </span>
+                )}
               </h2>
               
               {!currentRide ? (
                 <div className="space-y-6">
-                  <div className="p-3 bg-gray-50 rounded-lg text-xs flex items-center justify-between">
+                  <div className="p-3 bg-[#0E1A2A] rounded-xl text-xs flex items-center justify-between border border-[#1A2A4A]">
                     <span className="text-gray-500">Location:</span>
-                    <span className="font-medium">
+                    <span className="font-medium text-white">
                       {locationMethod === 'gps' && '📡 GPS'}
                       {locationMethod === 'network' && '📶 Network'}
                       {locationMethod === 'manual' && '📍 Manual'}
                       {locationMethod === 'default' && '⚠️ Default'}
                     </span>
                     {locationMethod === 'default' && (
-                      <button onClick={updateLocation} className="text-blue-600 hover:underline">
+                      <button onClick={updateLocation} className="text-[#1A6BFF] hover:text-[#5294FF]">
                         Try Again
                       </button>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      <FaMapMarkerAlt className="inline mr-1 text-green-600" /> Pickup
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      <FaMapMarkerAlt className="inline mr-1 text-green-400" /> Pickup
                     </label>
                     <PlaceSearch
                       onSelect={handlePickupSelect}
@@ -1443,7 +1600,7 @@ const RiderDashboard = () => {
                       <button
                         onClick={updateLocation}
                         disabled={isGettingLocation}
-                        className="text-blue-600 hover:text-blue-800 text-sm flex items-center"
+                        className="text-[#1A6BFF] hover:text-[#5294FF] text-sm flex items-center"
                       >
                         <FaCrosshairs className="mr-1" /> 
                         {isGettingLocation ? 'Locating...' : 'Use My Location'}
@@ -1452,8 +1609,8 @@ const RiderDashboard = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      <FaFlag className="inline mr-1 text-red-600" /> Destination
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                      <FaFlag className="inline mr-1 text-red-400" /> Destination
                     </label>
                     <PlaceSearch
                       onSelect={handleDestinationSelect}
@@ -1463,36 +1620,40 @@ const RiderDashboard = () => {
                     />
                   </div>
 
+                  {/* Service Section - Only Economy and Standard */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
                       <FaCar className="inline mr-1" /> Service
                     </label>
                     <div className="grid grid-cols-2 gap-2">
-                      {serviceTypes.map((service) => (
-                        <button
-                          key={service.id}
-                          onClick={() => setSelectedService(service.id)}
-                          className={`p-3 rounded-lg border-2 text-sm transition ${
-                            selectedService === service.id
-                              ? 'border-black bg-gray-50'
-                              : 'border-gray-200 hover:border-gray-400'
-                          }`}
-                        >
-                          <div className="font-medium">{service.name}</div>
-                          <div className="text-xs text-gray-500">{service.description}</div>
-                          <div className="text-xs font-bold mt-1">
-                            {service.id === 'economy' && '💰 Budget'}
-                            {service.id === 'standard' && '⭐ Standard'}
-                            {service.id === 'premium' && '💎 Luxury'}
-                            {service.id === 'van' && '🚐 7-Seater'}
-                          </div>
-                        </button>
-                      ))}
+                      <button
+                        onClick={() => setSelectedService('economy')}
+                        className={`p-3 rounded-xl border-2 text-sm transition ${
+                          selectedService === 'economy'
+                            ? 'border-[#1A6BFF] bg-[#1A6BFF]/10 text-white'
+                            : 'border-[#1A2A4A] text-gray-400 hover:border-[#1A6BFF] hover:text-white'
+                        }`}
+                      >
+                        <div className="font-medium">Vai Go</div>
+                        <div className="text-xs text-gray-500">Budget-friendly</div>
+                      </button>
+                      <button
+                        onClick={() => setSelectedService('standard')}
+                        className={`p-3 rounded-xl border-2 text-sm transition ${
+                          selectedService === 'standard'
+                            ? 'border-[#1A6BFF] bg-[#1A6BFF]/10 text-white'
+                            : 'border-[#1A2A4A] text-gray-400 hover:border-[#1A6BFF] hover:text-white'
+                        }`}
+                      >
+                        <div className="font-medium">Vai X</div>
+                        <div className="text-xs text-gray-500">Standard ride</div>
+                      </button>
                     </div>
                   </div>
 
+                  {/* Payment Method Selection */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-300 mb-2">
                       <FaWallet className="inline mr-1" /> Payment Method
                     </label>
                     <div className="grid grid-cols-3 gap-2">
@@ -1502,10 +1663,10 @@ const RiderDashboard = () => {
                           <button
                             key={method.id}
                             onClick={() => setSelectedPayment(method.id)}
-                            className={`p-3 rounded-lg border-2 text-sm transition flex flex-col items-center ${
+                            className={`p-3 rounded-xl border-2 text-sm transition flex flex-col items-center ${
                               selectedPayment === method.id
-                                ? 'border-black bg-gray-50'
-                                : 'border-gray-200 hover:border-gray-400'
+                                ? 'border-[#1A6BFF] bg-[#1A6BFF]/10 text-white'
+                                : 'border-[#1A2A4A] text-gray-400 hover:border-[#1A6BFF] hover:text-white'
                             }`}
                           >
                             <Icon className="h-5 w-5 mb-1" />
@@ -1517,32 +1678,32 @@ const RiderDashboard = () => {
                   </div>
 
                   {isPeak && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-center">
-                      <FaClock className="text-red-500 mr-2" />
-                      <span className="text-sm text-red-700">⚡ Peak pricing active (20%)</span>
+                    <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl flex items-center">
+                      <FaClock className="text-orange-400 mr-2" />
+                      <span className="text-sm text-orange-400">⚡ Peak pricing active (20%)</span>
                     </div>
                   )}
 
                   {distance > 0 && routeData && (
-                    <div className="p-4 bg-gray-50 rounded-lg">
+                    <div className="p-4 bg-[#0E1A2A] rounded-xl border border-[#1A2A4A]">
                       <div className="flex justify-between items-center">
                         <div>
-                          <h3 className="font-medium text-gray-700">Trip Details</h3>
-                          <p className="text-sm text-gray-500">
+                          <h3 className="font-medium text-white">Trip Details</h3>
+                          <p className="text-sm text-gray-400">
                             {routeData.distanceText} • {routeData.durationText}
                           </p>
-                          <p className="text-xs text-gray-400">Provider: {routeData.provider}</p>
+                          <p className="text-xs text-gray-500">Provider: {routeData.provider}</p>
                           {routeData.isFallback && (
-                            <p className="text-xs text-yellow-600">⚠️ Approximate route</p>
+                            <p className="text-xs text-yellow-400">⚠️ Approximate route</p>
                           )}
                         </div>
-                        <p className="text-2xl font-bold text-green-600">R{estimatedFare.toFixed(2)}</p>
+                        <p className="text-2xl font-bold text-green-400">R{estimatedFare.toFixed(2)}</p>
                       </div>
                       
                       <button
                         onClick={requestRide}
                         disabled={isRequesting || !destination || distance === 0 || isGettingLocation || !routeData}
-                        className="w-full mt-3 py-3 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50"
+                        className="w-full mt-3 py-3 bg-[#1A6BFF] text-white rounded-xl font-medium hover:bg-[#5294FF] transition disabled:opacity-50"
                       >
                         {isGettingLocation ? (
                           <span className="flex items-center justify-center">
@@ -1562,93 +1723,126 @@ const RiderDashboard = () => {
 
                   {isCalculatingRoute && (
                     <div className="text-center py-4">
-                      <FaSpinner className="animate-spin mx-auto h-8 w-8 text-blue-500" />
+                      <FaSpinner className="animate-spin mx-auto h-8 w-8 text-[#1A6BFF]" />
                       <p className="text-sm text-gray-500 mt-2">Calculating route...</p>
                     </div>
                   )}
 
-                  <div className="border-t pt-4">
-                    <p className="text-sm text-gray-500 flex items-center">
-                      <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                      {nearbyDrivers.length} drivers nearby (within 5km)
+                  <div className="border-t border-[#1A2A4A] pt-4">
+                    <p className="text-sm text-gray-400 flex items-center">
+                      <span className="w-2 h-2 bg-green-400 rounded-full mr-2"></span>
+                      {availableDrivers.length} drivers nearby
                     </p>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="p-4 bg-gray-50 rounded-lg">
-                    <h3 className="font-medium mb-3">Ride Details</h3>
+                  <div className="p-4 bg-[#0E1A2A] rounded-xl border border-[#1A2A4A]">
+                    <h3 className="font-medium text-white mb-3">Ride Details</h3>
                     <div className="space-y-2 text-sm">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Status</span>
-                        <span className="font-medium">{getRiderStatusMessage()}</span>
+                        <span className="text-gray-400">Status</span>
+                        <span className="font-medium text-white">{getRiderStatusMessage()}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Fare</span>
-                        <span className="font-bold text-green-600">R{currentRide.fare?.toFixed(2)}</span>
+                        <span className="text-gray-400">Fare</span>
+                        <span className="font-bold text-green-400">R{currentRide.fare?.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Distance</span>
-                        <span className="font-medium">{currentRide.distance?.toFixed(1) || '0'} km</span>
+                        <span className="text-gray-400">Distance</span>
+                        <span className="font-medium text-white">{currentRide.distance?.toFixed(1) || '0'} km</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Payment</span>
-                        <span className="font-medium capitalize">{currentRide.paymentMethod || 'Cash'}</span>
+                        <span className="text-gray-400">Payment</span>
+                        <span className="font-medium text-white capitalize">{currentRide.paymentMethod || 'Cash'}</span>
                       </div>
                       
                       {currentRide?.tripReference && (
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Trip Reference</span>
-                          <span className="font-mono font-medium text-xs bg-gray-100 px-2 py-0.5 rounded">
+                          <span className="text-gray-400">Trip Reference</span>
+                          <span className="font-mono font-medium text-xs text-white bg-[#1A2A4A] px-2 py-0.5 rounded border border-[#1A2A4A]">
                             {currentRide.tripReference}
                           </span>
                         </div>
                       )}
+
+                      {/* ALWAYS SHOW PICKUP AND DROPOFF ADDRESSES - DESKTOP */}
+                      <div className="pt-2 border-t border-[#1A2A4A] mt-2">
+                        <div className="p-3 bg-[#0A1228] rounded-xl border border-[#1A2A4A]">
+                          <div className="flex items-start space-x-2">
+                            <FaMapMarkerAlt className="text-green-400 mt-0.5 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-green-400">Pickup</p>
+                              <p className="text-sm text-white truncate">{currentRide?.pickupLocation?.address || pickupAddress || 'Pickup location'}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-start space-x-2 mt-2">
+                            <FaFlag className="text-red-400 mt-0.5 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-red-400">Dropoff</p>
+                              <p className="text-sm text-white truncate">{currentRide?.dropoffLocation?.address || destination || 'Destination'}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Searching for drivers animation - Desktop */}
+                      {rideStatus === 'requested' && (
+                        <div className="mt-2 p-4 bg-yellow-500/10 rounded-xl border border-yellow-500/20 text-center">
+                          <div className="flex items-center justify-center space-x-2">
+                            <div className="w-3 h-3 bg-green-400 rounded-full animate-ping"></div>
+                            <div className="w-3 h-3 bg-green-400 rounded-full animate-ping delay-75"></div>
+                            <div className="w-3 h-3 bg-green-400 rounded-full animate-ping delay-150"></div>
+                          </div>
+                          <p className="text-sm text-yellow-400 mt-2">🔍 Searching for nearby drivers...</p>
+                          <p className="text-xs text-yellow-400/60">Your pickup location is being broadcasted to drivers</p>
+                        </div>
+                      )}
                       
                       {driverInfo && rideStatus === 'accepted' && (
-                        <div className="pt-2 border-t">
-                          <p className="text-xs font-medium text-gray-700 mb-2">Driver Information</p>
-                          <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                        <div className="pt-2 border-t border-[#1A2A4A]">
+                          <p className="text-xs font-medium text-gray-400 mb-2">Driver Information</p>
+                          <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
                             <div className="flex items-center justify-between">
                               <div>
-                                <p className="text-sm font-medium text-gray-800">{driverInfo.name}</p>
-                                <p className="text-xs text-gray-500">Vehicle: {driverInfo.vehicle?.model}</p>
-                                <p className="text-xs text-gray-500">Plate: {driverInfo.vehicle?.plateNumber}</p>
+                                <p className="text-sm font-medium text-white">{driverInfo.name}</p>
+                                <p className="text-xs text-gray-400">Vehicle: {driverInfo.vehicle?.model}</p>
+                                <p className="text-xs text-gray-400">Plate: {driverInfo.vehicle?.plateNumber}</p>
                               </div>
                               <div className="text-right">
-                                <p className="text-xs text-gray-500">ETA</p>
-                                <p className="font-bold text-sm text-green-600">
+                                <p className="text-xs text-gray-400">ETA</p>
+                                <p className="font-bold text-sm text-green-400">
                                   {driverEta !== null ? formatTime(driverEta) : '...'}
                                 </p>
                                 {driverArrivalTime && (
-                                  <p className="text-xs text-gray-400">at {driverArrivalTime}</p>
+                                  <p className="text-xs text-gray-500">at {driverArrivalTime}</p>
                                 )}
                               </div>
                             </div>
-                            <div className="mt-3 pt-3 border-t border-blue-200">
+                            <div className="mt-3 pt-3 border-t border-blue-500/20">
                               <div className="flex justify-between items-center">
                                 <div>
-                                  <p className="text-xs text-gray-500">Distance</p>
-                                  <p className="font-semibold text-sm">
+                                  <p className="text-xs text-gray-400">Distance</p>
+                                  <p className="font-semibold text-sm text-white">
                                     {distanceToDriver !== null ? formatDistance(distanceToDriver) : '...'}
                                   </p>
                                 </div>
                                 <div>
-                                  <p className="text-xs text-gray-500">Speed</p>
-                                  <p className="font-semibold text-sm">
+                                  <p className="text-xs text-gray-400">Speed</p>
+                                  <p className="font-semibold text-sm text-white">
                                     {driverSpeed > 0 ? `${Math.round(driverSpeed)} km/h` : '...'}
                                   </p>
                                 </div>
                               </div>
                               {distanceToDriver !== null && driverEta !== null && (
                                 <div className="mt-2">
-                                  <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                  <div className="flex justify-between text-xs text-gray-500 mb-1">
                                     <span>{formatDistance(distanceToDriver)} away</span>
                                     <span>~{formatTime(driverEta)}</span>
                                   </div>
-                                  <div className="w-full bg-gray-200 rounded-full h-1.5">
+                                  <div className="w-full bg-[#1A2A4A] rounded-full h-1.5">
                                     <div 
-                                      className="bg-blue-600 h-1.5 rounded-full transition-all duration-500"
+                                      className="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
                                       style={{ width: `${Math.min(100, 100 - (distanceToDriver / 10) * 100)}%` }}
                                     ></div>
                                   </div>
@@ -1660,22 +1854,22 @@ const RiderDashboard = () => {
                       )}
                       
                       {rideStatus === 'arrived' && (
-                        <div className="pt-2 border-t">
-                          <div className="p-3 bg-purple-50 rounded-lg border border-purple-200">
-                            <p className="text-purple-700 font-medium">📍 Driver has arrived</p>
-                            <p className="text-xs text-purple-500">Please meet your driver at the pickup point</p>
+                        <div className="pt-2 border-t border-[#1A2A4A]">
+                          <div className="p-3 bg-purple-500/10 rounded-xl border border-purple-500/20">
+                            <p className="text-purple-400 font-medium">📍 Driver has arrived</p>
+                            <p className="text-xs text-purple-400/60">Please meet your driver at the pickup point</p>
                           </div>
                         </div>
                       )}
                       
                       {rideStatus === 'in-progress' && (
-                        <div className="pt-2 border-t">
-                          <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 flex items-center justify-between">
+                        <div className="pt-2 border-t border-[#1A2A4A]">
+                          <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20 flex items-center justify-between">
                             <div className="flex items-center space-x-2">
-                              <FaCar className="text-blue-600 h-4 w-4" />
-                              <span className="text-sm text-gray-600">Ride in progress</span>
+                              <FaCar className="text-blue-400 h-4 w-4" />
+                              <span className="text-sm text-gray-300">Ride in progress</span>
                             </div>
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-gray-400">
                               {distance > 0 && `${formatDistance(distance)} to destination`}
                             </span>
                           </div>
@@ -1683,10 +1877,10 @@ const RiderDashboard = () => {
                       )}
                       
                       {rideStatus !== 'completed' && rideStatus !== 'cancelled' && (
-                        <div className="pt-2 border-t mt-2">
+                        <div className="pt-2 border-t border-[#1A2A4A] mt-2">
                           <button
                             onClick={() => setIsChatOpen(true)}
-                            className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center justify-center relative"
+                            className="w-full py-2 bg-blue-500/20 text-blue-400 rounded-xl hover:bg-blue-500/30 transition flex items-center justify-center relative border border-blue-500/20"
                           >
                             <FaComment className="mr-2" /> Chat with {driverInfo?.name || 'Driver'}
                             {unreadMessages > 0 && (
@@ -1702,7 +1896,7 @@ const RiderDashboard = () => {
                         <button
                           onClick={cancelRide}
                           disabled={isLoading}
-                          className="w-full mt-2 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+                          className="w-full mt-2 py-2 bg-red-500/20 text-red-400 rounded-xl hover:bg-red-500/30 transition border border-red-500/20"
                         >
                           Cancel Ride
                         </button>
@@ -1735,7 +1929,7 @@ const RiderDashboard = () => {
                               clearInterval(locationRequestInterval.current);
                             }
                           }}
-                          className="w-full mt-2 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition"
+                          className="w-full mt-2 py-2 bg-[#1A6BFF] text-white rounded-xl hover:bg-[#5294FF] transition"
                         >
                           Close
                         </button>
@@ -1749,11 +1943,11 @@ const RiderDashboard = () => {
         )}
       </div>
 
-      {/* Payment Modal */}
+      {/* Payment Modal - Dark theme */}
       {showPaymentModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full">
-            <h3 className="text-xl font-bold mb-4">Select Payment Method</h3>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-[#0E1A2A] rounded-2xl p-6 max-w-sm w-full border border-[#1A2A4A]">
+            <h3 className="text-xl font-bold text-white mb-4">Select Payment Method</h3>
             <div className="space-y-2">
               {paymentOptions.map((method) => {
                 const Icon = method.icon;
@@ -1765,16 +1959,16 @@ const RiderDashboard = () => {
                       setShowPaymentModal(false);
                       toast.success(`Payment method: ${method.label}`);
                     }}
-                    className={`w-full p-4 rounded-lg border-2 flex items-center space-x-3 transition ${
+                    className={`w-full p-4 rounded-xl border-2 flex items-center space-x-3 transition ${
                       selectedPayment === method.id
-                        ? 'border-black bg-gray-50'
-                        : 'border-gray-200 hover:border-gray-400'
+                        ? 'border-[#1A6BFF] bg-[#1A6BFF]/10 text-white'
+                        : 'border-[#1A2A4A] text-gray-400 hover:border-[#1A6BFF] hover:text-white'
                     }`}
                   >
                     <Icon className="h-6 w-6" />
                     <span className="font-medium">{method.label}</span>
                     {selectedPayment === method.id && (
-                      <span className="ml-auto text-green-600">✓</span>
+                      <span className="ml-auto text-green-400">✓</span>
                     )}
                   </button>
                 );
@@ -1782,7 +1976,7 @@ const RiderDashboard = () => {
             </div>
             <button
               onClick={() => setShowPaymentModal(false)}
-              className="w-full mt-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition"
+              className="w-full mt-4 py-2 bg-[#1A2A4A] text-white rounded-xl hover:bg-[#2A3A5A] transition"
             >
               Cancel
             </button>
@@ -1816,31 +2010,31 @@ const RiderDashboard = () => {
         />
       )}
 
-      {/* Bottom Navigation - Mobile */}
+      {/* Bottom Navigation - Mobile - Dark theme */}
       {isMobile && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 safe-area-bottom" style={{ height: '60px' }}>
+        <div className="fixed bottom-0 left-0 right-0 bg-[#080E1F] border-t border-[#1A2A4A] z-50 safe-area-bottom" style={{ height: '60px' }}>
           <div className="flex items-center justify-around h-14 max-w-screen-lg mx-auto px-4">
             <button
               onClick={() => setShowPaymentModal(true)}
-              className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors"
+              className="flex flex-col items-center justify-center text-gray-500 hover:text-white transition-colors"
             >
               <FaWallet className="h-5 w-5" />
-              <span className="text-[9px] mt-0.5 text-gray-400">Payment</span>
+              <span className="text-[9px] mt-0.5 text-gray-500">Payment</span>
             </button>
             <button
               onClick={requestRide}
               disabled={isRequesting || !destination || distance === 0 || !routeData}
-              className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors disabled:opacity-50"
+              className="flex flex-col items-center justify-center text-gray-500 hover:text-white transition-colors disabled:opacity-50"
             >
-              <FaCar className="h-6 w-6 text-black" />
-              <span className="text-[9px] mt-0.5 font-medium text-black">Ride</span>
+              <FaCar className="h-6 w-6 text-[#1A6BFF]" />
+              <span className="text-[9px] mt-0.5 font-medium text-white">Ride</span>
             </button>
             <button
               onClick={() => navigate('/history')}
-              className="flex flex-col items-center justify-center text-gray-400 hover:text-black transition-colors"
+              className="flex flex-col items-center justify-center text-gray-500 hover:text-white transition-colors"
             >
               <FaHistory className="h-5 w-5" />
-              <span className="text-[9px] mt-0.5 text-gray-400">History</span>
+              <span className="text-[9px] mt-0.5 text-gray-500">History</span>
             </button>
           </div>
         </div>
@@ -1851,12 +2045,50 @@ const RiderDashboard = () => {
           padding-bottom: env(safe-area-inset-bottom);
         }
         .car-marker {
-          filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.3));
+          filter: drop-shadow(0 4px 6px rgba(26, 107, 255, 0.3));
+        }
+        .driver-available-marker {
+          filter: drop-shadow(0 2px 4px rgba(26, 107, 255, 0.3));
+          animation: driverPulse 2s ease-in-out infinite;
+          cursor: pointer;
+        }
+        .driver-available-marker:hover {
+          animation: none;
+          transform: scale(1.2);
+        }
+        @keyframes driverPulse {
+          0% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.1); opacity: 0.8; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .pickup-radar {
+          animation: radarPulse 1.5s ease-out infinite;
+        }
+        @keyframes radarPulse {
+          0% {
+            box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+            transform: scale(1);
+          }
+          100% {
+            box-shadow: 0 0 0 30px rgba(34, 197, 94, 0);
+            transform: scale(1.5);
+          }
         }
         @media (max-width: 767px) {
           .leaflet-control-container {
             margin-bottom: 56px;
           }
+        }
+        /* Scrollbar styling */
+        .overflow-y-auto::-webkit-scrollbar {
+          width: 4px;
+        }
+        .overflow-y-auto::-webkit-scrollbar-track {
+          background: #0E1A2A;
+        }
+        .overflow-y-auto::-webkit-scrollbar-thumb {
+          background: #1A6BFF;
+          border-radius: 4px;
         }
       `}</style>
     </div>

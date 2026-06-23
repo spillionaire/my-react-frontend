@@ -1,3 +1,5 @@
+// frontend/src/utils/navigation.js
+
 /**
  * Calculate bearing (direction) between two points
  * @param {number} lat1 - Starting latitude
@@ -100,7 +102,6 @@ export const isInSouthAfrica = (lat, lng) => {
 
 /**
  * Get route between two points (simplified - straight line)
- * In production, use Mapbox or Google Directions API
  */
 export const getRoutePoints = (start, end, numPoints = 20) => {
   const points = [];
@@ -301,4 +302,89 @@ export const getStatusMessage = (distanceKm, etaMinutes, type = 'driver') => {
   } else {
     return `Driver ${dist} away • ETA ${time}`;
   }
+};
+
+/**
+ * Get midpoint between two points
+ * @param {object} point1 - {lat, lng}
+ * @param {object} point2 - {lat, lng}
+ * @returns {object} Midpoint {lat, lng}
+ */
+export const getMidpoint = (point1, point2) => {
+  return {
+    lat: (point1.lat + point2.lat) / 2,
+    lng: (point1.lng + point2.lng) / 2
+  };
+};
+
+/**
+ * Check if coordinates are valid
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @returns {boolean} True if valid
+ */
+export const isValidCoordinate = (lat, lng) => {
+  return lat >= -90 && lat <= 90 && 
+         lng >= -180 && lng <= 180 && 
+         !isNaN(lat) && !isNaN(lng);
+};
+
+/**
+ * Get a readable address from coordinates (reverse geocoding)
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @returns {Promise<string>} Address string
+ */
+export const reverseGeocode = async (lat, lng) => {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
+    );
+    const data = await response.json();
+    return data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  } catch (error) {
+    console.error('Reverse geocoding error:', error);
+    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  }
+};
+
+/**
+ * Search for places using OpenStreetMap Nominatim
+ * @param {string} query - Search query
+ * @param {string} countryCode - Country code (e.g., 'za' for South Africa)
+ * @param {number} limit - Number of results
+ * @returns {Promise<Array>} Array of places
+ */
+export const searchPlaces = async (query, countryCode = 'za', limit = 5) => {
+  if (!query || query.length < 2) return [];
+  
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=${limit}&addressdetails=1&countrycodes=${countryCode}`
+    );
+    const data = await response.json();
+    return data.map(item => ({
+      lat: parseFloat(item.lat),
+      lng: parseFloat(item.lon),
+      display_name: item.display_name,
+      name: item.name,
+      type: item.type,
+      address: item.address
+    }));
+  } catch (error) {
+    console.error('Search places error:', error);
+    return [];
+  }
+};
+
+/**
+ * Check if a point is within a radius of another point
+ * @param {object} point1 - {lat, lng}
+ * @param {object} point2 - {lat, lng}
+ * @param {number} radiusKm - Radius in kilometers
+ * @returns {boolean} True if within radius
+ */
+export const isWithinRadius = (point1, point2, radiusKm) => {
+  const dist = calculateDistance(point1.lat, point1.lng, point2.lat, point2.lng);
+  return dist <= radiusKm;
 };

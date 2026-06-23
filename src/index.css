@@ -2,10 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Custom styles */
+/* Custom styles - Dark Theme */
 @layer base {
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    @apply bg-[#03060F] text-white antialiased;
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
       'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
@@ -13,31 +13,95 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
+  /* Dark theme scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #0E1A2A;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #1A6BFF;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #5294FF;
+  }
+
+  /* Selection color */
+  ::selection {
+    background: #1A6BFF;
+    color: white;
+  }
 }
 
 @layer components {
+  /* Buttons - Dark Theme */
   .btn-primary {
-    @apply bg-black text-white px-6 py-3 rounded-lg font-medium hover:bg-gray-800 transition disabled:opacity-50;
+    @apply bg-[#1A6BFF] text-white px-6 py-3 rounded-xl font-medium hover:bg-[#5294FF] transition disabled:opacity-50 shadow-lg shadow-[#1A6BFF]/30;
   }
   
   .btn-secondary {
-    @apply bg-gray-200 text-gray-800 px-6 py-3 rounded-lg font-medium hover:bg-gray-300 transition;
+    @apply bg-[#0E1A2A] text-white px-6 py-3 rounded-xl font-medium hover:bg-[#1A2A4A] transition border border-[#1A2A4A];
   }
   
   .btn-danger {
-    @apply bg-red-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-red-700 transition;
+    @apply bg-red-500/20 text-red-400 px-6 py-3 rounded-xl font-medium hover:bg-red-500/30 transition border border-red-500/20;
   }
   
   .btn-green {
-    @apply bg-green-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-green-700 transition;
+    @apply bg-green-500/20 text-green-400 px-6 py-3 rounded-xl font-medium hover:bg-green-500/30 transition border border-green-500/20;
+  }
+
+  .btn-black {
+    @apply bg-white text-black px-6 py-3 rounded-xl font-medium hover:bg-gray-200 transition;
   }
   
+  /* Cards - Dark Theme */
   .card {
-    @apply bg-white rounded-xl shadow-lg p-6;
+    @apply bg-[#0E1A2A] rounded-xl shadow-lg p-6 border border-[#1A2A4A];
   }
   
+  /* Input Fields - Dark Theme */
   .input-field {
-    @apply w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent;
+    @apply w-full px-4 py-3 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] focus:border-transparent transition;
+  }
+
+  /* Select Fields - Dark Theme */
+  .select-field {
+    @apply w-full px-4 py-3 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition appearance-none;
+  }
+
+  /* Textarea - Dark Theme */
+  .textarea-field {
+    @apply w-full px-4 py-3 bg-[#080E1F] border border-[#1A2A4A] rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1A6BFF] transition resize-none;
+  }
+
+  /* Labels - Dark Theme */
+  .label {
+    @apply block text-sm font-medium text-gray-300 mb-1.5;
+  }
+
+  /* Badges - Dark Theme */
+  .badge-success {
+    @apply bg-green-500/20 text-green-400 border border-green-500/20 px-2 py-0.5 rounded-full text-xs;
+  }
+
+  .badge-danger {
+    @apply bg-red-500/20 text-red-400 border border-red-500/20 px-2 py-0.5 rounded-full text-xs;
+  }
+
+  .badge-warning {
+    @apply bg-yellow-500/20 text-yellow-400 border border-yellow-500/20 px-2 py-0.5 rounded-full text-xs;
+  }
+
+  .badge-info {
+    @apply bg-[#1A6BFF]/20 text-[#1A6BFF] border border-[#1A6BFF]/20 px-2 py-0.5 rounded-full text-xs;
   }
 }
 
@@ -48,22 +112,35 @@
   z-index: 0;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
+/* Leaflet popup dark theme override */
+.leaflet-popup-content-wrapper {
+  background: #0E1A2A !important;
+  color: white !important;
+  border-radius: 12px !important;
+  border: 1px solid #1A2A4A !important;
 }
 
-::-webkit-scrollbar-track {
-  background: #f1f1f1;
+.leaflet-popup-tip {
+  background: #0E1A2A !important;
 }
 
-::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 3px;
+.leaflet-popup-content {
+  color: white !important;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #555;
+/* Leaflet control dark theme */
+.leaflet-control-zoom {
+  border: 1px solid #1A2A4A !important;
+}
+
+.leaflet-control-zoom a {
+  background: #0E1A2A !important;
+  color: white !important;
+  border-color: #1A2A4A !important;
+}
+
+.leaflet-control-zoom a:hover {
+  background: #1A2A4A !important;
 }
 
 /* Animation classes */
@@ -88,29 +165,104 @@
 }
 
 .spinner {
-  border: 3px solid #f3f3f3;
-  border-top: 3px solid #000000;
+  border: 3px solid #1A2A4A;
+  border-top: 3px solid #1A6BFF;
   border-radius: 50%;
   width: 40px;
   height: 40px;
   animation: spin 1s linear infinite;
 }
 
-/* Toast customization */
+/* Toast customization - Dark Theme */
 .Toastify__toast {
   border-radius: 12px !important;
   font-family: inherit !important;
+  background: #0E1A2A !important;
+  color: white !important;
+  border: 1px solid #1A2A4A !important;
 }
 
-/* GPS accuracy indicator */
+.Toastify__toast--success {
+  border-left: 4px solid #00D97E !important;
+}
+
+.Toastify__toast--error {
+  border-left: 4px solid #FF4455 !important;
+}
+
+.Toastify__toast--warning {
+  border-left: 4px solid #FFD700 !important;
+}
+
+.Toastify__toast-body {
+  color: white !important;
+}
+
+/* GPS accuracy indicator - Dark Theme */
 .gps-accurate {
-  border-left: 3px solid #22c55e;
+  border-left: 3px solid #00D97E;
 }
 
 .gps-fallback {
-  border-left: 3px solid #eab308;
+  border-left: 3px solid #FFD700;
 }
 
 .gps-error {
-  border-left: 3px solid #ef4444;
+  border-left: 3px solid #FF4455;
+}
+
+/* Loading shimmer effect */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #0E1A2A 25%, #1A2A4A 50%, #0E1A2A 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Modal overlay - Dark Theme */
+.modal-overlay {
+  @apply fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4;
+}
+
+.modal-content {
+  @apply bg-[#0E1A2A] rounded-2xl p-6 max-w-md w-full border border-[#1A2A4A] max-h-[90vh] overflow-y-auto;
+}
+
+/* Dark theme scrollbar for modal */
+.modal-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+  background: #080E1F;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+  background: #1A6BFF;
+  border-radius: 2px;
+}
+
+/* Glow effects */
+.glow-blue {
+  box-shadow: 0 0 30px rgba(26, 107, 255, 0.15);
+}
+
+.glow-green {
+  box-shadow: 0 0 30px rgba(0, 217, 126, 0.15);
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(14, 26, 42, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
